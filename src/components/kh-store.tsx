@@ -483,8 +483,12 @@ export function SiteFooter() {
             +2348100234233
           </p>
           <div className="mt-5 flex gap-4 text-xs uppercase tracking-wider">
-            <span>Instagram</span>
-            <span>TikTok</span>
+            <a href="https://www.instagram.com/khluxury/" target="_blank" rel="noreferrer">
+              <span>Instagram</span>
+            </a>
+            <a href="https://www.tiktok.com/@khluxury" target="_blank" rel="noreferrer">
+              <span>TikTok</span>
+            </a>
           </div>
         </div>
       </div>
