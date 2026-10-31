@@ -483,10 +483,18 @@ export function SiteFooter() {
             +2348100234233
           </p>
           <div className="mt-5 flex gap-4 text-xs uppercase tracking-wider">
-            <a href="https://www.instagram.com/khluxury/" target="_blank" rel="noreferrer">
+            <a
+              href="https://www.instagram.com/kh_luxury.ltd?psln=NWl4d3dlOHNicGty&utm_source=qr"
+              target="_blank"
+              rel="noreferrer"
+            >
               <span>Instagram</span>
             </a>
-            <a href="https://www.tiktok.com/@khluxury" target="_blank" rel="noreferrer">
+            <a
+              href="https://www.tiktok.com/@kh_luxury?_r=1&_t=ZS-9B1LR5Fwc7B"
+              target="_blank"
+              rel="noreferrer"
+            >
               <span>TikTok</span>
             </a>
           </div>
