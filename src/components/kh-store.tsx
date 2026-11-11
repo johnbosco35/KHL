@@ -1,5 +1,5 @@
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   Heart,
   Menu,
@@ -28,6 +28,7 @@ import type { Customization, Product } from "@/lib/mock-data";
 import { formatPrice } from "@/lib/mock-data";
 import { AppProvider, savePending, useApp, type PendingAction } from "@/lib/app-store";
 import { cn } from "@/lib/utils";
+import { Tilt } from "@/components/kh-3d";
 
 export const StoreProvider = AppProvider;
 
@@ -163,16 +164,94 @@ function AccountMenu() {
   );
 }
 
+/** Fades + lifts its children into view the first time they scroll on screen. */
+export function Reveal({
+  children,
+  className,
+  delay = 0,
+  as: Tag = "div",
+}: {
+  children: ReactNode;
+  className?: string;
+  delay?: number;
+  as?: "div" | "section" | "article";
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [shown, setShown] = useState(false);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const io = new IntersectionObserver(
+      ([e]) => {
+        if (e?.isIntersecting) {
+          setShown(true);
+          io.disconnect();
+        }
+      },
+      { threshold: 0.12, rootMargin: "0px 0px -40px 0px" },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
+  return (
+    <Tag
+      ref={ref}
+      className={cn("reveal", shown && "is-visible", className)}
+      style={delay ? { transitionDelay: `${delay}ms` } : undefined}
+    >
+      {children}
+    </Tag>
+  );
+}
+
+function useScrolled(offset = 24) {
+  const [scrolled, setScrolled] = useState(false);
+  useEffect(() => {
+    const on = () => setScrolled(window.scrollY > offset);
+    on();
+    window.addEventListener("scroll", on, { passive: true });
+    return () => window.removeEventListener("scroll", on);
+  }, [offset]);
+  return scrolled;
+}
+
+const announcements = [
+  "Complimentary delivery in Lagos on orders over ₦150,000",
+  "Made in Lagos · Crafted in small batches",
+  "Bespoke tees — make it unmistakably yours",
+  "Concierge on WhatsApp · +234 810 023 4233",
+];
+
 export function SiteHeader() {
   const { pathname: path } = useLocation();
   const { cart, wishlist, user } = useApp();
+  const scrolled = useScrolled();
   return (
     <>
-      <div className="bg-primary px-4 py-2 text-center text-[10px] uppercase tracking-[0.22em] text-primary-foreground">
-        Complimentary delivery in Lagos on orders over ₦150,000
+      <div className="overflow-hidden bg-primary py-2.5 text-[10px] uppercase tracking-[0.24em] text-primary-foreground/85">
+        <div className="flex w-max animate-marquee hover:[animation-play-state:paused]">
+          {[...announcements, ...announcements].map((a, i) => (
+            <span key={i} className="flex items-center gap-10 px-5 whitespace-nowrap">
+              {a}
+              <span className="text-luxury">✦</span>
+            </span>
+          ))}
+        </div>
       </div>
-      <header className="sticky top-0 z-40 border-b border-border/70 bg-background/95 backdrop-blur">
-        <div className="mx-auto grid h-20 max-w-[1440px] grid-cols-[auto_1fr_auto] items-center gap-4 px-4 sm:px-8">
+      <header
+        className={cn(
+          "sticky top-0 z-40 border-b transition-all duration-500",
+          scrolled
+            ? "border-border/70 bg-background/90 shadow-[0_8px_30px_-18px_rgba(0,0,0,.35)] backdrop-blur-xl"
+            : "border-transparent bg-background",
+        )}
+      >
+        <div
+          className={cn(
+            "mx-auto grid max-w-[1440px] grid-cols-[auto_1fr_auto] items-center gap-4 px-4 transition-[height] duration-500 sm:px-8",
+            scrolled ? "h-16" : "h-20",
+          )}
+        >
           <Sheet>
             <SheetTrigger asChild>
               <Button variant="ghost" size="icon" className="lg:hidden" aria-label="Open menu">
@@ -211,8 +290,9 @@ export function SiteHeader() {
               <Link
                 key={to}
                 to={to}
+                data-active={path === to}
                 className={cn(
-                  "text-xs uppercase tracking-[0.14em] transition-colors hover:text-luxury",
+                  "link-underline text-[11px] font-medium uppercase tracking-[0.2em] transition-colors hover:text-luxury",
                   path === to && "text-luxury",
                 )}
               >
@@ -324,49 +404,80 @@ export function ProductCard({ product }: { product: Product }) {
   const { addToCart, toggleWishlist, wishlist } = useStore();
   const liked = wishlist.includes(product.id);
   const soldOut = product.stock <= 0;
+  const alt = product.images?.find((i) => i !== product.image);
   return (
     <article className="group min-w-0">
-      <div className="relative overflow-hidden bg-secondary">
-        <Link to={`/product/${product.id}`}>
-          <img
-            src={product.image}
-            alt={product.name}
-            loading="lazy"
-            className="aspect-[3/4] w-full object-cover transition-transform duration-700 group-hover:scale-[1.025]"
-          />
-        </Link>
-        <Button
-          variant="secondary"
-          size="icon"
-          className="absolute right-3 top-3 rounded-full"
-          aria-label={liked ? "Remove from wishlist" : "Add to wishlist"}
-          onClick={() => toggleWishlist(product.id)}
-        >
-          <Heart className={liked ? "fill-current text-luxury" : ""} />
-        </Button>
-        <div className="absolute inset-x-3 bottom-3 grid translate-y-3 grid-cols-2 gap-2 opacity-0 transition-all group-hover:translate-y-0 group-hover:opacity-100">
-          <Button asChild variant="secondary">
-            <Link to={`/product/${product.id}`}>View details</Link>
-          </Button>
-          <Button disabled={soldOut} onClick={() => addToCart(product)}>
-            {soldOut ? "Sold out" : "Add to bag"}
-          </Button>
+      <Tilt className="shadow-[0_20px_40px_-28px_rgba(0,0,0,.45)] group-hover:shadow-[0_35px_60px_-30px_rgba(0,0,0,.55)]">
+        <div className="relative overflow-hidden bg-secondary">
+          <Link to={`/product/${product.id}`} className="block">
+            <img
+              src={product.image}
+              alt={product.name}
+              loading="lazy"
+              className={cn(
+                "aspect-[3/4] w-full object-cover transition-all duration-[1200ms] ease-out group-hover:scale-[1.05]",
+                alt && "group-hover:opacity-0",
+                soldOut && "grayscale-[.6]",
+              )}
+            />
+            {alt && (
+              <img
+                src={alt}
+                alt=""
+                aria-hidden
+                loading="lazy"
+                className="absolute inset-0 h-full w-full scale-[1.05] object-cover opacity-0 transition-all duration-[1200ms] ease-out group-hover:scale-100 group-hover:opacity-100"
+              />
+            )}
+            <span className="pointer-events-none absolute inset-0 bg-gradient-to-t from-primary/45 via-transparent to-transparent opacity-0 transition-opacity duration-500 group-hover:opacity-100" />
+          </Link>
+          <button
+            className="absolute right-3 top-3 grid size-9 place-items-center rounded-full bg-background/85 shadow-sm backdrop-blur transition-all duration-300 hover:scale-110 hover:bg-background"
+            aria-label={liked ? "Remove from wishlist" : "Add to wishlist"}
+            onClick={() => toggleWishlist(product.id)}
+          >
+            <Heart className={cn("size-4 transition-colors", liked && "fill-luxury text-luxury")} />
+          </button>
+          <div className="absolute inset-x-3 bottom-3 grid translate-y-4 grid-cols-2 gap-2 opacity-0 transition-all duration-500 group-hover:translate-y-0 group-hover:opacity-100 max-md:hidden">
+            <Button asChild variant="secondary" className="bg-background/90 backdrop-blur">
+              <Link to={`/product/${product.id}`}>View</Link>
+            </Button>
+            <Button disabled={soldOut} onClick={() => addToCart(product)}>
+              {soldOut ? "Sold out" : "Add to bag"}
+            </Button>
+          </div>
+          <div className="absolute left-3 top-3 flex flex-col gap-1.5">
+            {product.newArrival && (
+              <span className="bg-background/90 px-2.5 py-1 text-[9px] font-semibold uppercase tracking-[.2em] backdrop-blur">
+                New
+              </span>
+            )}
+            {soldOut ? (
+              <span className="bg-primary px-2.5 py-1 text-[9px] font-semibold uppercase tracking-[.2em] text-primary-foreground">
+                Sold out
+              </span>
+            ) : product.stock <= 5 ? (
+              <span className="bg-luxury px-2.5 py-1 text-[9px] font-semibold uppercase tracking-[.2em] text-primary">
+                Only {product.stock} left
+              </span>
+            ) : null}
+          </div>
         </div>
-        {product.newArrival && (
-          <span className="absolute left-3 top-3 bg-background px-2 py-1 text-[9px] uppercase tracking-[.15em]">
-            New
-          </span>
-        )}
-      </div>
+      </Tilt>
       <div className="pt-4">
-        <p className="text-[10px] uppercase tracking-[.16em] text-muted-foreground">
+        <p className="text-[10px] uppercase tracking-[.2em] text-muted-foreground">
           {product.category}
         </p>
-        <div className="mt-1 grid grid-cols-[minmax(0,1fr)_auto] gap-2">
-          <Link to={`/product/${product.id}`} className="min-w-0 truncate font-display text-lg">
+        <div className="mt-1.5 grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-2">
+          <Link
+            to={`/product/${product.id}`}
+            className="min-w-0 truncate font-display text-xl transition-colors hover:text-luxury"
+          >
             {product.name}
           </Link>
-          <span className="shrink-0 text-sm">{formatPrice(product.price)}</span>
+          <span className="shrink-0 text-sm font-medium tracking-wide">
+            {formatPrice(product.price)}
+          </span>
         </div>
         <div className="mt-2 flex gap-1.5">
           {product.colors.map((c) => (
@@ -447,14 +558,43 @@ export function EmptyState({
 
 export function SiteFooter() {
   return (
-    <footer className="bg-primary text-primary-foreground">
+    <footer className="relative overflow-hidden bg-primary text-primary-foreground">
+      <div className="mx-auto grid max-w-[1440px] items-end gap-8 border-b border-primary-foreground/10 px-6 py-14 md:grid-cols-2 md:px-10">
+        <div>
+          <p className="eyebrow">The private list</p>
+          <h3 className="mt-3 font-display text-4xl leading-tight sm:text-5xl">
+            First to know. <span className="italic text-luxury">First to wear.</span>
+          </h3>
+        </div>
+        <form
+          className="flex border-b border-primary-foreground/30 transition-colors focus-within:border-luxury"
+          onSubmit={(e) => {
+            e.preventDefault();
+            (e.currentTarget as HTMLFormElement).reset();
+            toast.success("Welcome to the KH Luxury private list");
+          }}
+        >
+          <input
+            type="email"
+            required
+            placeholder="Your email address"
+            aria-label="Email address"
+            className="h-14 flex-1 bg-transparent text-sm placeholder:text-primary-foreground/40 focus:outline-none"
+          />
+          <button
+            type="submit"
+            className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[.2em] text-luxury transition-colors hover:text-primary-foreground"
+          >
+            Subscribe <ArrowRight className="size-4" />
+          </button>
+        </form>
+      </div>
       <div className="mx-auto grid max-w-[1440px] gap-12 px-6 py-16 md:grid-cols-[1.4fr_1fr_1fr_1fr] md:px-10">
         <div>
           <Logo inverse />
-          <div className="mt-5 flex items-center gap-2 text-sm">
-            <span>SLOGAN:</span>
-            <p>WEAR YOUR PERSONALITY.</p>
-          </div>
+          <p className="mt-6 font-display text-2xl italic tracking-wide text-luxury">
+            Wear your personality.
+          </p>
           <p className="mt-5 max-w-xs text-sm leading-6 text-primary-foreground/60">
             Modern African luxury, shaped with confidence and made for a considered life.
           </p>
@@ -500,8 +640,21 @@ export function SiteFooter() {
           </div>
         </div>
       </div>
-      <div className="border-t border-primary-foreground/10 px-6 py-5 text-center text-[10px] uppercase tracking-wider text-primary-foreground/45">
-        © 2026 KH Luxury · <Link to="/terms">Terms</Link> · <Link to="/privacy">Privacy</Link>
+      <p
+        aria-hidden
+        className="pointer-events-none select-none px-4 text-center font-display text-[22vw] leading-[.8] tracking-tight text-primary-foreground/[.04] md:text-[16vw]"
+      >
+        KH LUXURY
+      </p>
+      <div className="relative border-t border-primary-foreground/10 px-6 py-5 text-center text-[10px] uppercase tracking-[.2em] text-primary-foreground/45">
+        © {new Date().getFullYear()} KH Luxury ·{" "}
+        <Link to="/terms" className="hover:text-luxury">
+          Terms
+        </Link>{" "}
+        ·{" "}
+        <Link to="/privacy" className="hover:text-luxury">
+          Privacy
+        </Link>
       </div>
     </footer>
   );
@@ -538,9 +691,13 @@ export function WhatsAppButton() {
       target="_blank"
       rel="noreferrer"
       aria-label="Contact KH Luxury on WhatsApp"
-      className="fixed bottom-5 right-5 z-40 grid size-12 place-items-center rounded-full bg-primary text-primary-foreground shadow-lg transition-transform hover:-translate-y-1"
+      className="group fixed bottom-5 right-5 z-40 flex h-12 items-center gap-0 rounded-full bg-primary pl-3.5 pr-3.5 text-primary-foreground shadow-[0_10px_30px_-10px_rgba(0,0,0,.5)] ring-1 ring-luxury/40 transition-all duration-500 hover:-translate-y-1 hover:gap-2 hover:pr-5"
     >
-      <MessageCircle />
+      <span className="absolute inset-0 -z-10 animate-ping rounded-full bg-luxury/20 [animation-duration:3s]" />
+      <MessageCircle className="size-5 text-luxury" />
+      <span className="max-w-0 overflow-hidden whitespace-nowrap text-[10px] font-semibold uppercase tracking-[.2em] transition-all duration-500 group-hover:max-w-40">
+        Concierge
+      </span>
     </a>
   );
 }

@@ -21,3 +21,44 @@
 @utility bg-image-overlay { background:linear-gradient(0deg,color-mix(in oklab,var(--primary) 72%,transparent),transparent 55%); }
 @media(max-width:640px){.section{padding:4.5rem 1.25rem}.product-grid{gap:2rem .65rem}}
 @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}*,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important}}
+
+/* ---------- Luxury polish layer ---------- */
+::selection{background:var(--luxury);color:var(--primary)}
+body{-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;text-rendering:optimizeLegibility}
+.font-display{letter-spacing:-.01em}
+::-webkit-scrollbar{width:10px;height:10px}::-webkit-scrollbar-track{background:var(--background)}::-webkit-scrollbar-thumb{background:color-mix(in oklab,var(--deep) 35%,transparent);border:3px solid var(--background);border-radius:999px}
+
+@keyframes kh-fade-up{from{opacity:0;transform:translateY(28px)}to{opacity:1;transform:none}}
+@keyframes kh-fade{from{opacity:0}to{opacity:1}}
+@keyframes kh-slow-zoom{from{transform:scale(1.12)}to{transform:scale(1)}}
+@keyframes kh-marquee{from{transform:translateX(0)}to{transform:translateX(-50%)}}
+@keyframes kh-scroll-cue{0%{transform:scaleY(0);transform-origin:top}45%{transform:scaleY(1);transform-origin:top}55%{transform:scaleY(1);transform-origin:bottom}100%{transform:scaleY(0);transform-origin:bottom}}
+@keyframes kh-shine{from{background-position:200% 0}to{background-position:-200% 0}}
+
+@utility animate-fade-up { animation:kh-fade-up 1s cubic-bezier(.2,.7,.2,1) both; }
+@utility animate-fade { animation:kh-fade 1.4s ease both; }
+@utility animate-slow-zoom { animation:kh-slow-zoom 2.6s cubic-bezier(.2,.7,.2,1) both; }
+@utility animate-marquee { animation:kh-marquee 38s linear infinite; }
+@utility animate-scroll-cue { animation:kh-scroll-cue 2.4s cubic-bezier(.65,0,.35,1) infinite; }
+@utility delay-1 { animation-delay:.15s; }
+@utility delay-2 { animation-delay:.3s; }
+@utility delay-3 { animation-delay:.45s; }
+@utility delay-4 { animation-delay:.6s; }
+
+/* Scroll reveal (paired with <Reveal>) */
+.reveal{opacity:0;transform:translateY(32px);transition:opacity 1s cubic-bezier(.2,.7,.2,1),transform 1s cubic-bezier(.2,.7,.2,1)}
+.reveal.is-visible{opacity:1;transform:none}
+
+/* Animated underline for text links */
+@utility link-underline { position:relative; &::after{content:"";position:absolute;left:0;bottom:-4px;height:1px;width:100%;background:currentColor;transform:scaleX(0);transform-origin:right;transition:transform .45s cubic-bezier(.2,.7,.2,1)} &:hover::after,&[data-active=true]::after{transform:scaleX(1);transform-origin:left} }
+
+/* Gold accents */
+@utility gold-rule { display:block; height:1px; width:3.5rem; background:linear-gradient(90deg,var(--luxury),transparent); }
+@utility text-gold-gradient { background:linear-gradient(100deg,oklch(.62 .07 70),oklch(.82 .07 88),oklch(.62 .07 70)); background-size:200% 100%; -webkit-background-clip:text; background-clip:text; color:transparent; animation:kh-shine 8s linear infinite; }
+
+/* Film grain for dark imagery */
+@utility grain { &::before{content:"";position:absolute;inset:0;pointer-events:none;opacity:.12;mix-blend-mode:overlay;background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>")} }
+
+@media(prefers-reduced-motion:reduce){.reveal{opacity:1;transform:none}}
+@keyframes kh-coin{0%{transform:rotateY(0) rotateX(8deg)}50%{transform:rotateY(180deg) rotateX(-8deg)}100%{transform:rotateY(360deg) rotateX(8deg)}}
+@utility animate-coin { animation:kh-coin 14s cubic-bezier(.45,0,.55,1) infinite; }

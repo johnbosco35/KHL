@@ -36,7 +36,8 @@ import {
   AccordionItem,
   AccordionTrigger,
 } from "@/components/ui/accordion";
-import { ProductCard, EmptyState, Logo, Quantity, useStore } from "@/components/kh-store";
+import { ProductCard, EmptyState, Logo, Quantity, Reveal, useStore } from "@/components/kh-store";
+import { Carousel3D, Tilt, useParallax } from "@/components/kh-3d";
 import { categories, formatPrice, products, type Product } from "@/lib/mock-data";
 
 const orders = [
@@ -114,33 +115,99 @@ export function SectionTitle({
   );
 }
 
+/** Slowly spinning 3D gold coin with an orbiting text ring. */
+function Medallion() {
+  return (
+    <div className="relative size-56 [perspective:900px] xl:size-64">
+      <svg
+        viewBox="0 0 200 200"
+        className="absolute -inset-8 h-[calc(100%+4rem)] w-[calc(100%+4rem)] animate-[spin_28s_linear_infinite] text-luxury/80"
+        aria-hidden
+      >
+        <defs>
+          <path id="kh-orbit" d="M100,100 m-88,0 a88,88 0 1,1 176,0 a88,88 0 1,1 -176,0" />
+        </defs>
+        <text className="fill-current text-[10px] uppercase tracking-[.42em]">
+          <textPath href="#kh-orbit">Wear your personality ✦ Made in Lagos ✦ KH Luxury ✦</textPath>
+        </text>
+      </svg>
+      <div className="relative h-full w-full animate-coin [transform-style:preserve-3d]">
+        {[0, 180].map((r) => (
+          <div
+            key={r}
+            className="absolute inset-0 grid place-items-center rounded-full border border-white/30 [backface-visibility:hidden] shadow-[inset_0_0_30px_rgba(0,0,0,.35),0_30px_60px_-20px_rgba(0,0,0,.7)]"
+            style={{
+              transform: `rotateY(${r}deg) translateZ(6px)`,
+              background:
+                "radial-gradient(circle at 30% 25%, oklch(.9 .07 88), oklch(.7 .08 80) 45%, oklch(.45 .06 65) 100%)",
+            }}
+          >
+            <div className="grid size-[78%] place-items-center rounded-full border border-black/15 shadow-[inset_0_2px_8px_rgba(255,255,255,.5),inset_0_-4px_10px_rgba(0,0,0,.25)]">
+              <div className="text-center text-primary">
+                <p className="font-display text-6xl leading-none tracking-tight xl:text-7xl">KH</p>
+                <p className="mt-1 text-[9px] font-semibold uppercase tracking-[.4em]">
+                  {r ? "Lagos" : "Luxury"}
+                </p>
+              </div>
+            </div>
+          </div>
+        ))}
+        {/* coin edge */}
+        {Array.from({ length: 6 }).map((_, i) => (
+          <div
+            key={i}
+            className="absolute inset-0 rounded-full"
+            style={{
+              transform: `translateZ(${i * 2 - 5}px)`,
+              background: "oklch(.5 .06 70)",
+            }}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function HomePage() {
+  const heroRef = useParallax<HTMLElement>();
   return (
     <main>
-      <section className="relative min-h-[78vh] overflow-hidden bg-primary">
-        <img
-          src={hero}
-          alt="KH Luxury campaign"
-          width={1536}
-          height={1024}
-          className="absolute inset-0 h-full w-full object-cover"
-        />
+      <section
+        ref={heroRef}
+        className="grain relative min-h-[calc(100svh-7rem)] overflow-hidden bg-primary [perspective:1200px]"
+      >
+        <div
+          data-depth="24"
+          className="absolute -inset-10 transition-transform duration-700 ease-out"
+        >
+          <img
+            src={hero}
+            alt="KH Luxury campaign"
+            width={1536}
+            height={1024}
+            className="h-full w-full animate-slow-zoom object-cover"
+          />
+        </div>
         <div className="absolute inset-0 bg-hero-overlay" />
-        <div className="relative mx-auto flex min-h-[78vh] max-w-[1440px] items-end px-6 pb-16 pt-36 sm:px-10 sm:pb-24">
-          <div className="max-w-xl text-primary-foreground">
-            <p className="mb-4 text-xs uppercase tracking-[.25em] text-luxury">
-              The Foundational Collection
+        <div className="absolute inset-0 bg-gradient-to-t from-primary/70 via-transparent to-primary/20" />
+        <div className="relative mx-auto flex min-h-[calc(100svh-7rem)] max-w-[1440px] items-end px-6 pb-20 pt-36 sm:px-10 sm:pb-28">
+          <div
+            data-depth="-14"
+            className="max-w-2xl text-primary-foreground transition-transform duration-700 ease-out [transform-style:preserve-3d]"
+          >
+            <p className="mb-6 flex animate-fade-up items-center gap-4 text-[11px] uppercase tracking-[.3em] text-luxury">
+              <span className="gold-rule" /> The Foundational Collection
             </p>
-            <h1 className="font-display text-6xl leading-[.92] sm:text-8xl">
+            <h1 className="animate-fade-up font-display text-6xl leading-[.9] delay-1 sm:text-8xl lg:text-[8.5rem]">
               Quiet power.
               <br />
-              Distinctly yours.
+              <span className="italic text-gold-gradient">Distinctly yours.</span>
             </h1>
-            <p className="mt-6 max-w-md text-sm leading-7 text-primary-foreground/75">
+            <p className="mt-8 max-w-md animate-fade-up text-sm leading-7 text-primary-foreground/75 delay-2 sm:text-base">
               Modern African luxury composed with intention—for those who move with confidence, not
               noise.
             </p>
-            <div className="mt-8 flex flex-wrap gap-3">
+            <div className="mt-10 flex animate-fade-up flex-wrap gap-3 delay-3">
               <Button
                 asChild
                 size="lg"
@@ -160,27 +227,89 @@ export function HomePage() {
               </Button>
             </div>
           </div>
+          <div
+            data-depth="40"
+            className="absolute right-[8%] top-1/2 hidden -translate-y-1/2 transition-transform duration-700 ease-out lg:block"
+          >
+            <Medallion />
+          </div>
+          <div className="absolute bottom-8 right-6 hidden animate-fade items-center gap-4 text-[10px] uppercase tracking-[.3em] text-primary-foreground/60 delay-4 sm:right-10 md:flex">
+            Scroll
+            <span className="relative block h-14 w-px overflow-hidden bg-primary-foreground/15">
+              <span className="absolute inset-0 animate-scroll-cue bg-luxury" />
+            </span>
+          </div>
+        </div>
+      </section>
+      <section className="border-b bg-background">
+        <div className="mx-auto grid max-w-[1440px] grid-cols-2 divide-border md:grid-cols-4 md:divide-x">
+          {[
+            [Package, "Made in Lagos", "Small-batch atelier craft"],
+            [ShieldCheck, "Secure checkout", "Verified bank transfer"],
+            [Star, "Bespoke pieces", "Customise your signature tee"],
+            [MapPin, "Lagos delivery", "Complimentary over ₦150k"],
+          ].map(([Icon, title, text], i) => {
+            const I = Icon as typeof Package;
+            return (
+              <Reveal
+                key={String(title)}
+                delay={i * 90}
+                className="flex items-center gap-4 px-5 py-7 sm:px-8"
+              >
+                <span className="grid size-11 shrink-0 place-items-center rounded-full border border-luxury/40 text-luxury">
+                  <I className="size-4" />
+                </span>
+                <div className="min-w-0">
+                  <p className="text-[11px] font-semibold uppercase tracking-[.16em]">
+                    {String(title)}
+                  </p>
+                  <p className="mt-1 text-xs text-muted-foreground">{String(text)}</p>
+                </div>
+              </Reveal>
+            );
+          })}
         </div>
       </section>
       <section className="section">
-        <SectionTitle eyebrow="The edit" title="New arrivals" link="/shop" />
+        <Reveal>
+          <SectionTitle eyebrow="The edit" title="New arrivals" link="/shop" />
+        </Reveal>
         <div className="product-grid">
-          {products.slice(0, 4).map((p) => (
-            <ProductCard key={p.id} product={p} />
+          {products.slice(0, 4).map((p, i) => (
+            <Reveal key={p.id} delay={i * 110}>
+              <ProductCard product={p} />
+            </Reveal>
           ))}
         </div>
       </section>
+      <section className="relative overflow-hidden bg-gradient-to-b from-background via-secondary/70 to-background py-20 sm:py-28">
+        <Reveal className="mx-auto max-w-2xl px-6 text-center">
+          <p className="eyebrow">The collection in the round</p>
+          <h2 className="mt-3 font-display text-4xl sm:text-6xl">
+            Every angle, <span className="italic text-luxury">considered.</span>
+          </h2>
+          <p className="mt-4 text-sm text-muted-foreground">Drag to explore the full edit.</p>
+        </Reveal>
+        <Reveal delay={150} className="mt-6">
+          <Carousel3D products={products.slice(0, 8)} />
+        </Reveal>
+      </section>
       <section className="grid bg-primary text-primary-foreground lg:grid-cols-2">
-        <img
-          src={editorial2}
-          alt="Featured KH Luxury collection"
-          width={1024}
-          height={1280}
-          loading="lazy"
-          className="h-[65vh] w-full object-cover"
-        />
+        <div className="group relative overflow-hidden">
+          <img
+            src={editorial2}
+            alt="Featured KH Luxury collection"
+            width={1024}
+            height={1280}
+            loading="lazy"
+            className="h-[75vh] w-full object-cover transition-transform duration-[2000ms] ease-out group-hover:scale-105"
+          />
+          <span className="absolute left-6 top-6 font-display text-8xl leading-none text-primary-foreground/20 sm:text-9xl">
+            01
+          </span>
+        </div>
         <div className="flex items-center px-7 py-16 sm:px-16">
-          <div className="max-w-lg">
+          <Reveal className="max-w-lg">
             <p className="eyebrow text-luxury">Featured / 01</p>
             <h2 className="mt-4 font-display text-5xl sm:text-7xl">
               The Noir
@@ -199,14 +328,18 @@ export function HomePage() {
             >
               <Link to="/collections">Discover the collection</Link>
             </Button>
-          </div>
+          </Reveal>
         </div>
       </section>
       <section className="section">
-        <SectionTitle eyebrow="Most considered" title="Best sellers" />
+        <Reveal>
+          <SectionTitle eyebrow="Most considered" title="Best sellers" />
+        </Reveal>
         <div className="product-grid">
-          {products.slice(4, 8).map((p) => (
-            <ProductCard key={p.id} product={p} />
+          {products.slice(4, 8).map((p, i) => (
+            <Reveal key={p.id} delay={i * 110}>
+              <ProductCard product={p} />
+            </Reveal>
           ))}
         </div>
       </section>
@@ -218,23 +351,35 @@ export function HomePage() {
               ["Tees", editorial1],
               ["Jackets", editorial3],
               ["Shorts", editorial2],
-            ].map(([c, img]) => (
-              <Link
-                key={c}
-                to={`/category/${String(c).toLowerCase()}`}
-                className="group relative overflow-hidden"
-              >
-                <img
-                  src={img}
-                  alt={`${c} collection`}
-                  loading="lazy"
-                  className="aspect-[4/5] w-full object-cover transition-transform duration-700 group-hover:scale-[1.03]"
-                />
-                <div className="absolute inset-0 bg-image-overlay" />
-                <span className="absolute bottom-6 left-6 font-display text-3xl text-primary-foreground">
-                  {c} <ArrowRight className="ml-2 inline size-5" />
-                </span>
-              </Link>
+            ].map(([c, img], i) => (
+              <Reveal key={c} delay={i * 120}>
+                <Tilt max={6}>
+                  <Link
+                    to={`/category/${String(c).toLowerCase()}`}
+                    className="group relative block overflow-hidden"
+                  >
+                    <img
+                      src={img}
+                      alt={`${c} collection`}
+                      loading="lazy"
+                      className="aspect-[4/5] w-full object-cover transition-transform duration-[1400ms] ease-out group-hover:scale-[1.06]"
+                    />
+                    <div className="absolute inset-0 bg-image-overlay transition-opacity duration-500 group-hover:opacity-90" />
+                    <span className="absolute inset-3 border border-primary-foreground/0 transition-colors duration-500 group-hover:border-primary-foreground/30" />
+                    <div className="absolute inset-x-6 bottom-6 flex items-end justify-between text-primary-foreground">
+                      <div>
+                        <p className="text-[10px] uppercase tracking-[.3em] text-luxury">
+                          0{i + 1}
+                        </p>
+                        <span className="mt-1 block font-display text-4xl">{c}</span>
+                      </div>
+                      <span className="grid size-11 place-items-center rounded-full border border-primary-foreground/40 transition-all duration-500 group-hover:border-luxury group-hover:bg-luxury group-hover:text-primary">
+                        <ArrowRight className="size-4 -rotate-45 transition-transform duration-500 group-hover:rotate-0" />
+                      </span>
+                    </div>
+                  </Link>
+                </Tilt>
+              </Reveal>
             ))}
           </div>
         </div>
@@ -267,7 +412,7 @@ export function HomePage() {
       <section className="border-y bg-background py-24 text-center">
         <div className="mx-auto max-w-3xl px-6">
           <p className="eyebrow">Our philosophy</p>
-          <blockquote className="mt-6 font-display text-4xl leading-tight sm:text-6xl">
+          <blockquote className="reveal is-visible mt-6 font-display text-4xl italic leading-tight sm:text-6xl">
             “Luxury is not excess. It is the confidence of choosing only what matters.”
           </blockquote>
           <Button asChild variant="link" className="mt-8">
@@ -285,7 +430,13 @@ export function HomePage() {
             "My jacket arrived beautifully presented and fits like it was made for me.",
             "The custom tee process was effortless. The result feels truly personal.",
           ].map((q, i) => (
-            <article key={q} className="bg-background p-8">
+            <article
+              key={q}
+              className="relative bg-background p-8 transition-colors duration-500 hover:bg-card sm:p-10"
+            >
+              <span className="absolute right-8 top-4 font-display text-7xl leading-none text-luxury/25">
+                ”
+              </span>
               <div className="flex gap-1 text-luxury">
                 {Array.from({ length: 5 }).map((_, j) => (
                   <Star key={j} className="size-3 fill-current" />
@@ -297,32 +448,6 @@ export function HomePage() {
               </p>
             </article>
           ))}
-        </div>
-      </section>
-      <section className="bg-secondary py-20">
-        <div className="mx-auto max-w-xl px-6 text-center">
-          <p className="eyebrow">Private access</p>
-          <h2 className="mt-3 font-display text-4xl">Receive the next chapter</h2>
-          <p className="mt-4 text-sm text-muted-foreground">
-            New collections, private releases, and stories from the atelier.
-          </p>
-          <form
-            className="mt-8 flex border-b border-foreground"
-            onSubmit={(e) => {
-              e.preventDefault();
-              toast.success("Welcome to KH Luxury updates");
-            }}
-          >
-            <Input
-              className="h-12 rounded-none border-0 bg-transparent shadow-none focus-visible:ring-0"
-              placeholder="Email address"
-              type="email"
-              required
-            />
-            <Button type="submit" variant="ghost" size="icon">
-              <ArrowRight />
-            </Button>
-          </form>
         </div>
       </section>
     </main>
