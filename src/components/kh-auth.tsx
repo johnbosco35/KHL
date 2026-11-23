@@ -1,6 +1,6 @@
 import { Link, useNavigate } from "react-router-dom";
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
-import { Loader2, ShieldCheck } from "lucide-react";
+import { Eye, EyeOff, Loader2, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
 import { z } from "zod";
 import editorial2 from "@/assets/kh-editorial-2.jpg";
@@ -32,21 +32,19 @@ const schemas = {
       path: ["confirm"],
     }),
   forgot: z.object({ email }),
-  reset: z
-    .object({ password: pw, confirm: z.string() })
-    .refine((d) => d.password === d.confirm, {
-      message: "Passwords do not match",
-      path: ["confirm"],
-    }),
+  reset: z.object({ password: pw, confirm: z.string() }).refine((d) => d.password === d.confirm, {
+    message: "Passwords do not match",
+    path: ["confirm"],
+  }),
 };
 
 /** Runs the action a guest attempted before signing in, then returns them to where they were. */
-function resumePending(app: AppStore, fallback: string): string {
+async function resumePending(app: AppStore, fallback: string): Promise<string> {
   const a = takePending();
   if (!a) return fallback;
   const product = "productId" in a ? app.products.find((p) => p.id === a.productId) : undefined;
-  if (a.type === "cart" && product) app.addToCart(product, a.size, a.color, a.quantity);
-  if (a.type === "wishlist" && product) app.toggleWishlist(a.productId, { onlyAdd: true });
+  if (a.type === "cart" && product) await app.addToCart(product, a.size, a.color, a.quantity);
+  if (a.type === "wishlist" && product) await app.toggleWishlist(a.productId, { onlyAdd: true });
   return a.returnTo || fallback;
 }
 
@@ -65,6 +63,8 @@ export function AuthPage({
   const navigate = useNavigate();
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
+  const [passwordVisible, setPasswordVisible] = useState(false);
+  const [confirmPasswordVisible, setConfirmPasswordVisible] = useState(false);
   const [resetLink, setResetLink] = useState<string | null>(null);
   const role: Role = admin ? "admin" : "customer";
   const home = admin ? "/admin/dashboard" : "/account";
@@ -98,30 +98,29 @@ export function AuthPage({
     }
     setErrors({});
     setBusy(true);
-    await new Promise((r) => setTimeout(r, 350));
     try {
       if (mode === "login") {
-        const u = app.signIn(data.email, data.password, role);
+        const u = await app.signIn(data.email, data.password, role);
         toast.success(`Welcome, ${u.name.split(" ")[0]}`);
-        navigate(admin ? home : resumePending(app, redirect || home));
+        navigate(admin ? home : await resumePending(app, redirect || home));
       }
       if (mode === "register") {
-        app.signUp({
+        await app.signUp({
           name: data.name,
           email: data.email,
           phone: data.phone,
           password: data.password,
         });
         toast.success("Your account has been created");
-        navigate(resumePending(app, redirect || home));
+        navigate(await resumePending(app, redirect || home));
       }
       if (mode === "forgot") {
-        const t = app.requestReset(data.email, role);
-        toast.success("If an account exists, a reset link has been sent.");
+        const t = await app.requestReset(data.email, role);
+        toast.success("If an account exists, a reset link has been sent to your email.");
         if (t) setResetLink(t);
       }
       if (mode === "reset") {
-        const u = app.resetPassword(token ?? "", data.password);
+        const u = await app.resetPassword(token ?? "", data.password);
         toast.success("Password updated. Please sign in.");
         navigate(u.role === "admin" ? "/admin/login" : "/login");
       }
@@ -197,6 +196,8 @@ export function AuthPage({
               type="password"
               err={errors["password"]}
               autoComplete={mode === "login" ? "current-password" : "new-password"}
+              showPassword={passwordVisible}
+              onTogglePassword={() => setPasswordVisible((visible) => !visible)}
             />
           )}
           {(mode === "register" || mode === "reset") && (
@@ -206,11 +207,13 @@ export function AuthPage({
               type="password"
               err={errors["confirm"]}
               autoComplete="new-password"
+              showPassword={confirmPasswordVisible}
+              onTogglePassword={() => setConfirmPasswordVisible((visible) => !visible)}
             />
           )}
           {resetLink ? (
             <div className="mt-6 border border-luxury bg-secondary p-4 text-sm">
-              <p>Reset email (preview): your secure link is ready.</p>
+              <p>Development mode: email is not configured, so here is your reset link.</p>
               <Button asChild className="mt-3 w-full">
                 <Link to={`/reset-password?token=${encodeURIComponent(resetLink)}`}>
                   Open reset link
@@ -278,10 +281,10 @@ export function AuthPage({
               </Link>
             )}
           </div>
-          {mode === "login" && (
+          {mode === "login" && import.meta.env.DEV && (
             <p className="mt-8 border-t pt-4 text-center text-[11px] text-muted-foreground">
-              Preview accounts —{" "}
-              {admin ? "admin@khluxury.com / Admin123!" : "amara@example.com / password123"}
+              Dev demo accounts —{" "}
+              {admin ? "your ADMIN_EMAIL / ADMIN_PASSWORD" : "amara@example.com / password123"}
             </p>
           )}
         </form>
@@ -292,6 +295,8 @@ export function AuthPage({
 function F({
   label,
   err,
+  showPassword,
+  onTogglePassword,
   ...props
 }: {
   label: string;
@@ -299,13 +304,38 @@ function F({
   name: string;
   type?: string;
   autoComplete?: string;
+  showPassword?: boolean;
+  onTogglePassword?: () => void;
 }) {
   return (
     <div className="mt-5">
       <Label htmlFor={props.name} className="mb-2 block text-xs uppercase tracking-wider">
         {label}
       </Label>
-      <Input id={props.name} aria-invalid={!!err} {...props} className="h-11" />
+      <div className={onTogglePassword ? "relative" : undefined}>
+        <Input
+          id={props.name}
+          aria-invalid={!!err}
+          {...props}
+          type={onTogglePassword ? (showPassword ? "text" : "password") : props.type}
+          className={onTogglePassword ? "h-11 pr-11" : "h-11"}
+        />
+        {onTogglePassword && (
+          <button
+            type="button"
+            className="absolute inset-y-0 right-0 flex items-center px-3 text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            aria-label={showPassword ? "Hide password" : "Show password"}
+            aria-pressed={showPassword}
+            onClick={onTogglePassword}
+          >
+            {showPassword ? (
+              <EyeOff className="size-4" aria-hidden="true" />
+            ) : (
+              <Eye className="size-4" aria-hidden="true" />
+            )}
+          </button>
+        )}
+      </div>
       {err && <p className="mt-1 text-xs text-destructive">{err}</p>}
     </div>
   );

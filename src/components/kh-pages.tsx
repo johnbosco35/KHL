@@ -1,11 +1,12 @@
-import { Link, useNavigate } from "react-router-dom";
-import { useMemo, useState, type FormEvent } from "react";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   ArrowRight,
   Check,
   ChevronRight,
   Filter,
   Heart,
+  Loader2,
   MapPin,
   Package,
   Search,
@@ -38,35 +39,51 @@ import {
 } from "@/components/ui/accordion";
 import { ProductCard, EmptyState, Logo, Quantity, Reveal, useStore } from "@/components/kh-store";
 import { Carousel3D, Tilt, useParallax } from "@/components/kh-3d";
-import { categories, formatPrice, products, type Product } from "@/lib/mock-data";
-
-const orders = [
-  {
-    id: "KH-260925-1051",
-    date: "25 Sep 2026",
-    items: 2,
-    amount: 171925,
-    status: "Payment verification",
-    payment: "Pending verification",
-  },
-  {
-    id: "KH-180925-7742",
-    date: "18 Sep 2026",
-    items: 1,
-    amount: 89000,
-    status: "Processing",
-    payment: "Confirmed",
-  },
-  {
-    id: "KH-120925-4431",
-    date: "12 Sep 2026",
-    items: 3,
-    amount: 245000,
-    status: "Delivered",
-    payment: "Paid",
-  },
-];
+import { RequireAuth } from "@/components/kh-auth";
+import {
+  readFileAsDataUrl,
+  useApp,
+  useApprovedReviews,
+  usePublicProducts,
+} from "@/lib/app-store";
+import {
+  formatDate,
+  formatPrice,
+  ORDER_STEP_LABELS,
+  ORDER_STEPS,
+  PAYMENT_LABELS,
+  shopCategories,
+  VAT_RATE,
+  whatsappLink,
+  type Order,
+  type Payment,
+  type Product,
+} from "@/lib/mock-data";
 import { cn } from "@/lib/utils";
+
+const MAX_UPLOAD = 8 * 1024 * 1024;
+/** Reads a user-chosen file as a data URL after checking its size and type. */
+async function readUpload(file: File, accept: "image" | "image-or-pdf"): Promise<string | null> {
+  const okType =
+    file.type.startsWith("image/") || (accept === "image-or-pdf" && file.type === "application/pdf");
+  if (!okType) {
+    toast.error(accept === "image" ? "Please choose an image." : "Please choose an image or PDF.");
+    return null;
+  }
+  if (file.size > MAX_UPLOAD) {
+    toast.error("File is too large (max 8 MB).");
+    return null;
+  }
+  return readFileAsDataUrl(file);
+}
+
+function Loading() {
+  return (
+    <div className="grid min-h-[50vh] place-items-center">
+      <Loader2 className="size-5 animate-spin text-luxury" />
+    </div>
+  );
+}
 
 export function PageIntro({
   eyebrow,
@@ -168,8 +185,36 @@ function Medallion() {
   );
 }
 
+const fallbackQuotes = [
+  {
+    text: "The quality is immediate—the weight, the fit, the restraint. It feels considered.",
+    author: "Adaeze N.",
+    rating: 5,
+  },
+  {
+    text: "My jacket arrived beautifully presented and fits like it was made for me.",
+    author: "Michael O.",
+    rating: 5,
+  },
+  {
+    text: "The custom tee process was effortless. The result feels truly personal.",
+    author: "Temi A.",
+    rating: 5,
+  },
+];
+
 export function HomePage() {
   const heroRef = useParallax<HTMLElement>();
+  const products = usePublicProducts();
+  const reviews = useApprovedReviews();
+  const fresh = products.filter((p) => p.newArrival);
+  const newArrivals = (fresh.length ? fresh : products).slice(0, 4);
+  const featured = products.filter((p) => p.featured && !newArrivals.includes(p));
+  const bestSellers = (featured.length ? featured : products.slice(4)).slice(0, 4);
+  const quotes = reviews.filter((r) => r.rating >= 4).slice(0, 3);
+  const testimonials = quotes.length
+    ? quotes.map((r) => ({ text: r.text, author: r.author ?? "KH client", rating: r.rating }))
+    : fallbackQuotes;
   return (
     <main>
       <section
@@ -275,7 +320,7 @@ export function HomePage() {
           <SectionTitle eyebrow="The edit" title="New arrivals" link="/shop" />
         </Reveal>
         <div className="product-grid">
-          {products.slice(0, 4).map((p, i) => (
+          {newArrivals.map((p, i) => (
             <Reveal key={p.id} delay={i * 110}>
               <ProductCard product={p} />
             </Reveal>
@@ -290,9 +335,11 @@ export function HomePage() {
           </h2>
           <p className="mt-4 text-sm text-muted-foreground">Drag to explore the full edit.</p>
         </Reveal>
-        <Reveal delay={150} className="mt-6">
-          <Carousel3D products={products.slice(0, 8)} />
-        </Reveal>
+        {products.length >= 3 && (
+          <Reveal delay={150} className="mt-6">
+            <Carousel3D products={products.slice(0, 8)} />
+          </Reveal>
+        )}
       </section>
       <section className="grid bg-primary text-primary-foreground lg:grid-cols-2">
         <div className="group relative overflow-hidden">
@@ -336,7 +383,7 @@ export function HomePage() {
           <SectionTitle eyebrow="Most considered" title="Best sellers" />
         </Reveal>
         <div className="product-grid">
-          {products.slice(4, 8).map((p, i) => (
+          {bestSellers.map((p, i) => (
             <Reveal key={p.id} delay={i * 110}>
               <ProductCard product={p} />
             </Reveal>
@@ -425,26 +472,18 @@ export function HomePage() {
       <section className="section">
         <SectionTitle eyebrow="In their words" title="The KH community" />
         <div className="grid gap-px bg-border md:grid-cols-3">
-          {[
-            "The quality is immediate—the weight, the fit, the restraint. It feels considered.",
-            "My jacket arrived beautifully presented and fits like it was made for me.",
-            "The custom tee process was effortless. The result feels truly personal.",
-          ].map((q, i) => (
+          {testimonials.map((q, i) => (
             <article
-              key={q}
+              key={i}
               className="relative bg-background p-8 transition-colors duration-500 hover:bg-card sm:p-10"
             >
               <span className="absolute right-8 top-4 font-display text-7xl leading-none text-luxury/25">
                 ”
               </span>
-              <div className="flex gap-1 text-luxury">
-                {Array.from({ length: 5 }).map((_, j) => (
-                  <Star key={j} className="size-3 fill-current" />
-                ))}
-              </div>
-              <p className="mt-6 font-display text-2xl leading-snug">“{q}”</p>
+              <Stars rating={q.rating} />
+              <p className="mt-6 font-display text-2xl leading-snug">“{q.text}”</p>
               <p className="mt-8 text-xs uppercase tracking-wider text-muted-foreground">
-                {["Adaeze N.", "Michael O.", "Temi A."][i]}
+                {q.author}
               </p>
             </article>
           ))}
@@ -455,25 +494,41 @@ export function HomePage() {
 }
 
 export function ShopPage({ initialCategory }: { initialCategory?: string }) {
-  const [query, setQuery] = useState("");
-  const [category, setCategory] = useState(initialCategory ?? "All");
-  const [sort, setSort] = useState("featured");
-  const filtered = useMemo(
-    () =>
-      products
-        .filter(
-          (p) =>
-            (category === "All" ||
-              p.category.toLowerCase() === category.toLowerCase() ||
-              (category === "New Arrivals" && p.newArrival) ||
-              (category === "Featured" && p.featured)) &&
-            p.name.toLowerCase().includes(query.toLowerCase()),
-        )
-        .sort((a, b) =>
-          sort === "low" ? a.price - b.price : sort === "high" ? b.price - a.price : 0,
-        ),
-    [query, category, sort],
+  const { categories: cats, ready } = useApp();
+  const products = usePublicProducts();
+  const categories = useMemo(
+    () => [...cats.filter((c) => c.active).map((c) => c.name), ...shopCategories],
+    [cats],
   );
+  // URLs use lower-case names (/category/tees); match them to the real category name.
+  const fromUrl = initialCategory
+    ? (categories.find((c) => c.toLowerCase() === initialCategory.toLowerCase()) ??
+      initialCategory)
+    : "All";
+  const [query, setQuery] = useState("");
+  const [category, setCategory] = useState(fromUrl);
+  const [sort, setSort] = useState("featured");
+  useEffect(() => setCategory(fromUrl), [fromUrl]);
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const list = products.filter(
+      (p) =>
+        (category === "All" ||
+          p.category.toLowerCase() === category.toLowerCase() ||
+          (category === "New Arrivals" && p.newArrival) ||
+          (category === "Featured" && p.featured)) &&
+        (p.name.toLowerCase().includes(q) || p.category.toLowerCase().includes(q)),
+    );
+    const by: Record<string, (a: Product, b: Product) => number> = {
+      low: (a, b) => a.price - b.price,
+      high: (a, b) => b.price - a.price,
+      new: (a, b) => b.createdAt.localeCompare(a.createdAt),
+      featured: (a, b) => Number(!!b.featured) - Number(!!a.featured),
+      popular: (a, b) => Number(!!b.featured) - Number(!!a.featured) || a.stock - b.stock,
+    };
+    return [...list].sort(by[sort] ?? (() => 0));
+  }, [products, query, category, sort]);
+  if (!ready) return <Loading />;
   return (
     <main>
       <PageIntro
@@ -595,9 +650,25 @@ export function CollectionsPage() {
 
 export function ProductPage({ product }: { product: Product }) {
   const { addToCart, toggleWishlist, wishlist } = useStore();
+  const products = usePublicProducts();
+  const reviews = useApprovedReviews(product.id);
   const [size, setSize] = useState(product.sizes.at(0) ?? "M");
   const [color, setColor] = useState(product.colors.at(0) ?? "Obsidian");
   const [qty, setQty] = useState(1);
+  const [adding, setAdding] = useState(false);
+  const soldOut = product.stock <= 0;
+  const related = [
+    ...products.filter((p) => p.id !== product.id && p.category === product.category),
+    ...products.filter((p) => p.id !== product.id && p.category !== product.category),
+  ].slice(0, 4);
+  const average = reviews.length
+    ? reviews.reduce((n, r) => n + r.rating, 0) / reviews.length
+    : 0;
+  useEffect(() => {
+    setSize(product.sizes.at(0) ?? "M");
+    setColor(product.colors.at(0) ?? "Obsidian");
+    setQty(1);
+  }, [product.id]); // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <main>
       <div className="mx-auto max-w-[1440px] px-5 py-8 sm:px-8">
@@ -626,6 +697,12 @@ export function ProductPage({ product }: { product: Product }) {
             <p className="eyebrow">{product.category}</p>
             <h1 className="mt-3 font-display text-5xl">{product.name}</h1>
             <p className="mt-3 text-lg">{formatPrice(product.price)}</p>
+            {reviews.length > 0 && (
+              <a href="#reviews" className="mt-3 flex items-center gap-2 text-xs">
+                <Stars rating={Math.round(average)} />
+                {average.toFixed(1)} · {reviews.length} review{reviews.length > 1 ? "s" : ""}
+              </a>
+            )}
             <p className="mt-6 leading-7 text-muted-foreground">{product.description}</p>
             <fieldset className="mt-8">
               <legend className="text-xs uppercase tracking-wider">Color — {color}</legend>
@@ -660,18 +737,25 @@ export function ProductPage({ product }: { product: Product }) {
               </div>
             </fieldset>
             <p className="mt-6 flex items-center gap-2 text-xs text-muted-foreground">
-              <span className="size-2 rounded-full bg-success" />
-              {product.stock} pieces available
+              <span className={cn("size-2 rounded-full", soldOut ? "bg-destructive" : "bg-success")} />
+              {soldOut ? "Currently sold out" : `${product.stock} pieces available`}
             </p>
             <div className="mt-6 grid grid-cols-[auto_1fr_auto] gap-2">
-              <Quantity value={qty} onChange={setQty} />
+              <Quantity
+                value={qty}
+                onChange={(v) => setQty(Math.min(Math.max(1, v), Math.max(1, product.stock)))}
+              />
               <Button
                 size="lg"
-                onClick={() => {
-                  for (let i = 0; i < qty; i++) addToCart(product, size, color);
+                disabled={soldOut || adding}
+                onClick={async () => {
+                  setAdding(true);
+                  await addToCart(product, size, color, qty);
+                  setAdding(false);
                 }}
               >
-                Add to bag
+                {adding && <Loader2 className="animate-spin" />}
+                {soldOut ? "Sold out" : "Add to bag"}
               </Button>
               <Button
                 variant="outline"
@@ -688,8 +772,8 @@ export function ProductPage({ product }: { product: Product }) {
               <AccordionItem value="details">
                 <AccordionTrigger>Product information</AccordionTrigger>
                 <AccordionContent>
-                  Heavyweight premium cotton. Relaxed silhouette. Finished with precision in Lagos.
-                  Cold wash, reshape, and air dry.
+                  {product.specifications ||
+                    "Heavyweight premium cotton. Relaxed silhouette. Finished with precision in Lagos. Cold wash, reshape, and air dry."}
                 </AccordionContent>
               </AccordionItem>
               <AccordionItem value="shipping">
@@ -703,26 +787,52 @@ export function ProductPage({ product }: { product: Product }) {
           </aside>
         </div>
       </div>
-      <section className="section">
-        <SectionTitle eyebrow="Complete the story" title="Related pieces" />
-        <div className="product-grid">
-          {products
-            .filter((p) => p.id !== product.id)
-            .slice(0, 4)
-            .map((p) => (
+      <section id="reviews" className="section pb-0">
+        <SectionTitle eyebrow="Client notes" title="Reviews" />
+        {reviews.length ? (
+          <div className="grid gap-px bg-border md:grid-cols-2">
+            {reviews.map((r) => (
+              <article key={r.id} className="bg-background p-7">
+                <Stars rating={r.rating} />
+                <p className="mt-4 leading-7">{r.text}</p>
+                {r.image && (
+                  <img src={r.image} alt="Customer photo" className="mt-4 size-24 object-cover" />
+                )}
+                <p className="mt-5 text-xs uppercase tracking-wider text-muted-foreground">
+                  {r.author ?? "KH client"} · {formatDate(r.date)}
+                </p>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            No reviews yet.{" "}
+            <Link to={`/reviews?product=${encodeURIComponent(product.id)}`} className="underline">
+              Be the first to share your experience.
+            </Link>
+          </p>
+        )}
+      </section>
+      {related.length > 0 && (
+        <section className="section">
+          <SectionTitle eyebrow="Complete the story" title="Related pieces" />
+          <div className="product-grid">
+            {related.map((p) => (
               <ProductCard key={p.id} product={p} />
             ))}
-        </div>
-      </section>
+          </div>
+        </section>
+      )}
     </main>
   );
 }
 
 export function CartPage() {
   const { cart, removeFromCart, updateQuantity } = useStore();
+  const { ready } = useApp();
   const subtotal = cart.reduce((s, i) => s + i.product.price * i.quantity, 0);
-  const delivery = subtotal >= 150000 ? 0 : 5000;
-  const vat = Math.round(subtotal * 0.075);
+  const vat = Math.round(subtotal * VAT_RATE);
+  if (!ready) return <Loading />;
   if (!cart.length)
     return (
       <main>
@@ -740,9 +850,9 @@ export function CartPage() {
       <PageIntro eyebrow="Your selection" title="Shopping bag" />
       <div className="mx-auto grid max-w-[1440px] gap-12 px-5 pb-24 sm:px-8 lg:grid-cols-[1fr_380px]">
         <div>
-          {cart.map(({ product, quantity, size, color }) => (
+          {cart.map(({ key, product, quantity, size, color, customization }) => (
             <div
-              key={product.id}
+              key={key}
               className="grid grid-cols-[110px_1fr] gap-5 border-b py-6 first:pt-0 sm:grid-cols-[140px_1fr_auto]"
             >
               <img
@@ -754,55 +864,84 @@ export function CartPage() {
                 <h2 className="font-display text-2xl">{product.name}</h2>
                 <p className="mt-2 text-xs text-muted-foreground">
                   {color} / {size}
+                  {customization ? " · Custom" : ""}
                 </p>
+                {customization && (
+                  <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">
+                    {customization.instructions}
+                  </p>
+                )}
                 <p className="mt-3 text-sm">{formatPrice(product.price)}</p>
                 <Button
                   variant="link"
                   className="mt-4 h-auto p-0 text-xs"
-                  onClick={() => removeFromCart(product.id)}
+                  onClick={() => removeFromCart(key)}
                 >
                   Remove
                 </Button>
               </div>
               <div className="col-start-2 sm:col-start-auto">
-                <Quantity value={quantity} onChange={(v) => updateQuantity(product.id, v)} />
+                <Quantity value={quantity} onChange={(v) => updateQuantity(key, v)} />
               </div>
             </div>
           ))}
         </div>
-        <OrderSummary subtotal={subtotal} delivery={delivery} vat={vat} />
+        <OrderSummary subtotal={subtotal} delivery={null} vat={vat} checkoutLink />
       </div>
     </main>
   );
 }
+/** `delivery: null` means it is chosen at checkout. */
 function OrderSummary({
   subtotal,
   delivery,
   vat,
+  checkoutLink = false,
+  children,
 }: {
   subtotal: number;
-  delivery: number;
+  delivery: number | null;
   vat: number;
+  checkoutLink?: boolean;
+  children?: ReactNode;
 }) {
   return (
     <aside className="h-fit border bg-secondary p-6">
       <h2 className="font-display text-3xl">Order summary</h2>
+      {children}
       <div className="mt-6 space-y-3 text-sm">
         <SummaryRow label="Subtotal" value={formatPrice(subtotal)} />
-        <SummaryRow label="Delivery" value={delivery ? formatPrice(delivery) : "Complimentary"} />
-        <SummaryRow label="VAT" value={formatPrice(vat)} />
+        <SummaryRow
+          label="Delivery"
+          value={
+            delivery === null
+              ? "Calculated at checkout"
+              : delivery
+                ? formatPrice(delivery)
+                : "Complimentary"
+          }
+        />
+        <SummaryRow label="VAT (7.5%)" value={formatPrice(vat)} />
         <div className="border-t pt-4">
-          <SummaryRow label="Total" value={formatPrice(subtotal + delivery + vat)} strong />
+          <SummaryRow
+            label={delivery === null ? "Total before delivery" : "Total"}
+            value={formatPrice(subtotal + (delivery ?? 0) + vat)}
+            strong
+          />
         </div>
       </div>
-      <Button asChild size="lg" className="mt-7 w-full">
-        <Link to="/checkout">
-          Proceed to checkout <ArrowRight />
-        </Link>
-      </Button>
-      <Button asChild variant="link" className="mt-2 w-full">
-        <Link to="/shop">Continue shopping</Link>
-      </Button>
+      {checkoutLink && (
+        <>
+          <Button asChild size="lg" className="mt-7 w-full">
+            <Link to="/checkout">
+              Proceed to checkout <ArrowRight />
+            </Link>
+          </Button>
+          <Button asChild variant="link" className="mt-2 w-full">
+            <Link to="/shop">Continue shopping</Link>
+          </Button>
+        </>
+      )}
     </aside>
   );
 }
@@ -817,7 +956,10 @@ function SummaryRow({ label, value, strong }: { label: string; value: string; st
 
 export function WishlistPage() {
   const { wishlist } = useStore();
+  const { ready } = useApp();
+  const products = usePublicProducts();
   const list = products.filter((p) => wishlist.includes(p.id));
+  if (!ready) return <Loading />;
   return (
     <main>
       <PageIntro
@@ -846,10 +988,56 @@ export function WishlistPage() {
 }
 
 export function CustomizePage() {
-  const [file, setFile] = useState<File | null>(null);
-  const [qty, setQty] = useState(1);
+  const { ready } = useApp();
+  const { addToCart, requireCustomer } = useStore();
+  const navigate = useNavigate();
+  const blanks = usePublicProducts().filter((p) => p.customizable);
+  const [blankId, setBlankId] = useState("");
+  const blank = blanks.find((b) => b.id === blankId) ?? blanks[0];
   const [size, setSize] = useState("M");
   const [color, setColor] = useState("Ivory");
+  const [qty, setQty] = useState(1);
+  const [file, setFile] = useState<{ name: string; size: number; dataUrl: string } | null>(null);
+  const [instructions, setInstructions] = useState("");
+  const [adding, setAdding] = useState(false);
+  useEffect(() => {
+    if (!blank) return;
+    setSize((s) => (blank.sizes.includes(s) ? s : (blank.sizes[0] ?? "M")));
+    setColor((c) => (blank.colors.includes(c) ? c : (blank.colors[0] ?? "Ivory")));
+  }, [blank]);
+  if (!ready) return <Loading />;
+  if (!blank)
+    return (
+      <main>
+        <PageIntro eyebrow="KH Custom Studio" title="Make the foundation yours" />
+        <EmptyState
+          title="The custom studio is resting"
+          text="No customisable pieces are available right now. Please check back soon."
+          link="/shop"
+          action="Explore collection"
+        />
+      </main>
+    );
+  const soldOut = blank.stock <= 0;
+  const add = async () => {
+    if (!file && instructions.trim().length < 5) {
+      toast.error("Upload your artwork or describe your design.");
+      return;
+    }
+    if (!requireCustomer()) return;
+    setAdding(true);
+    const ok = await addToCart(blank, size, color, qty, {
+      blank: blank.name,
+      instructions: instructions.trim(),
+      ...(file ? { designName: file.name, designData: file.dataUrl } : {}),
+    });
+    setAdding(false);
+    if (ok) {
+      setFile(null);
+      setInstructions("");
+      navigate("/cart");
+    }
+  };
   return (
     <main>
       <PageIntro
@@ -858,27 +1046,26 @@ export function CustomizePage() {
         text="Begin with our heavyweight tee. Add your artwork and direction; our studio will take it from there."
       />
       <div className="mx-auto grid max-w-[1200px] gap-12 px-5 pb-24 sm:px-8 lg:grid-cols-2">
-        <img
-          src={editorial3}
-          alt="KH Luxury blank tee"
-          className="aspect-[4/5] w-full object-cover"
-        />
+        <img src={blank.image} alt={blank.name} className="aspect-[4/5] w-full object-cover" />
         <div>
           <h2 className="font-display text-3xl">Build your tee</h2>
           <FormField label="Blank tee">
-            <Select defaultValue="foundation">
+            <Select value={blank.id} onValueChange={setBlankId}>
               <SelectTrigger className="h-12">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="foundation">Foundation Heavyweight Tee</SelectItem>
-                <SelectItem value="relaxed">Relaxed Studio Tee</SelectItem>
+                {blanks.map((b) => (
+                  <SelectItem key={b.id} value={b.id}>
+                    {b.name} · {formatPrice(b.price)}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </FormField>
           <FormField label="Size">
             <div className="grid grid-cols-5 gap-2">
-              {["S", "M", "L", "XL", "XXL"].map((s) => (
+              {blank.sizes.map((s) => (
                 <Button
                   key={s}
                   variant={size === s ? "default" : "outline"}
@@ -890,8 +1077,8 @@ export function CustomizePage() {
             </div>
           </FormField>
           <FormField label={`Color — ${color}`}>
-            <div className="flex gap-2">
-              {["Ivory", "Obsidian", "Sand"].map((c) => (
+            <div className="flex flex-wrap gap-2">
+              {blank.colors.map((c) => (
                 <Button
                   key={c}
                   variant={color === c ? "default" : "outline"}
@@ -903,7 +1090,7 @@ export function CustomizePage() {
             </div>
           </FormField>
           <FormField label="Quantity">
-            <Quantity value={qty} onChange={setQty} />
+            <Quantity value={qty} onChange={(v) => setQty(Math.min(Math.max(1, v), 99))} />
           </FormField>
           <FormField label="Your artwork">
             {file ? (
@@ -911,7 +1098,7 @@ export function CustomizePage() {
                 <div className="min-w-0">
                   <p className="truncate text-sm">{file.name}</p>
                   <p className="text-xs text-muted-foreground">
-                    {Math.ceil(file.size / 1024)} KB · Ready to preview
+                    {Math.ceil(file.size / 1024)} KB · Ready to send
                   </p>
                 </div>
                 <Button variant="ghost" size="icon" onClick={() => setFile(null)}>
@@ -923,36 +1110,42 @@ export function CustomizePage() {
                 <Upload className="size-5 text-luxury" />
                 <span className="mt-3 text-sm">Drop your artwork here or browse</span>
                 <span className="mt-1 text-xs text-muted-foreground">
-                  PNG, JPG or PDF · Up to 10 MB
+                  PNG, JPG or PDF · Up to 8 MB
                 </span>
                 <input
                   type="file"
                   className="sr-only"
                   accept="image/*,.pdf"
-                  onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+                  onChange={async (e) => {
+                    const f = e.target.files?.[0];
+                    e.target.value = "";
+                    if (!f) return;
+                    const dataUrl = await readUpload(f, "image-or-pdf");
+                    if (dataUrl) setFile({ name: f.name, size: f.size, dataUrl });
+                  }}
                 />
               </label>
             )}
           </FormField>
-          <FormField label="Additional instructions">
+          <FormField label="Design instructions">
             <Textarea
               className="min-h-28"
+              maxLength={2000}
+              value={instructions}
+              onChange={(e) => setInstructions(e.target.value)}
               placeholder="Placement, scale, preferred finish, or anything our studio should know..."
             />
           </FormField>
           <div className="mt-8 border-y py-5">
             <SummaryRow
-              label={`${qty} × Custom Foundation Tee`}
-              value={formatPrice(55000 * qty)}
+              label={`${qty} × Custom ${blank.name}`}
+              value={formatPrice(blank.price * qty)}
               strong
             />
           </div>
-          <Button
-            size="lg"
-            className="mt-6 w-full"
-            onClick={() => toast.success("Custom tee added to bag")}
-          >
-            Add custom tee to bag
+          <Button size="lg" className="mt-6 w-full" disabled={adding || soldOut} onClick={add}>
+            {adding && <Loader2 className="animate-spin" />}
+            {soldOut ? "Currently sold out" : "Add custom tee to bag"}
           </Button>
         </div>
       </div>
@@ -960,14 +1153,126 @@ export function CustomizePage() {
   );
 }
 
+const emailOk = (v: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim());
+
 export function CheckoutPage() {
+  return (
+    <RequireAuth role="customer">
+      <Checkout />
+    </RequireAuth>
+  );
+}
+function Checkout() {
+  const { user, cart, locations, settings, placeOrder, submitReceipt } = useApp();
   const navigate = useNavigate();
-  const { cart } = useStore();
   const [step, setStep] = useState(1);
-  const [receipt, setReceipt] = useState<File | null>(null);
-  const subtotal = cart.reduce((s, i) => s + i.product.price * i.quantity, 0) || 159000;
-  const previewItem = { product: products[0]!, quantity: 1, size: "M", color: "Obsidian" };
+  const [contact, setContact] = useState({
+    name: user?.name ?? "",
+    email: user?.email ?? "",
+    phone: user?.phone ?? "",
+  });
+  const [delivery, setDelivery] = useState({
+    address: "",
+    city: "",
+    state: "Lagos",
+    locationId: "",
+  });
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [order, setOrder] = useState<Order | null>(null);
+  const [receipt, setReceipt] = useState<{ name: string; type: string; dataUrl: string } | null>(
+    null,
+  );
+  const [busy, setBusy] = useState(false);
+  const active = locations.filter((l) => l.active);
+  const loc = active.find((l) => l.id === delivery.locationId);
+  const subtotal = order?.subtotal ?? cart.reduce((s, i) => s + i.product.price * i.quantity, 0);
+  const vat = order?.vat ?? Math.round(subtotal * VAT_RATE);
+  const fee = order ? order.deliveryFee : loc ? loc.fee : null;
   const labels = ["Customer", "Delivery", "Review", "Payment", "Receipt"];
+
+  if (!order && !cart.length)
+    return (
+      <main>
+        <PageIntro eyebrow="Checkout" title="Your bag is empty" />
+        <EmptyState
+          title="Nothing to check out yet"
+          text="Add a piece to your bag to begin."
+          link="/shop"
+          action="Explore collection"
+        />
+      </main>
+    );
+
+  const validate = (): boolean => {
+    const e: Record<string, string> = {};
+    if (step === 1) {
+      if (contact.name.trim().length < 2) e["name"] = "Enter your full name";
+      if (!emailOk(contact.email)) e["email"] = "Enter a valid email";
+      if (contact.phone.trim().length < 5) e["phone"] = "Enter a phone number";
+    }
+    if (step === 2) {
+      if (delivery.address.trim().length < 3) e["address"] = "Enter a delivery address";
+      if (!delivery.city.trim()) e["city"] = "Enter a city";
+      if (!delivery.state.trim()) e["state"] = "Enter a state";
+      if (!loc) e["locationId"] = "Choose a delivery option";
+    }
+    setErrors(e);
+    return !Object.keys(e).length;
+  };
+
+  const next = async () => {
+    if (!validate()) return;
+    if (step === 3) {
+      setBusy(true);
+      const placed = await placeOrder({
+        contact: {
+          name: contact.name.trim(),
+          email: contact.email.trim(),
+          phone: contact.phone.trim(),
+        },
+        delivery: {
+          address: delivery.address.trim(),
+          city: delivery.city.trim(),
+          state: delivery.state.trim(),
+          locationId: delivery.locationId,
+        },
+      });
+      setBusy(false);
+      if (!placed) return;
+      setOrder(placed);
+      toast.success(`Order ${placed.id} placed`);
+    }
+    if (step === 5) {
+      if (!order) return;
+      if (!receipt) {
+        setErrors({ receipt: "Upload your transfer receipt" });
+        return;
+      }
+      setBusy(true);
+      const ok = await submitReceipt(order.id, receipt);
+      setBusy(false);
+      if (ok) navigate(`/order-confirmation?order=${encodeURIComponent(order.id)}`);
+      return;
+    }
+    setStep((s) => s + 1);
+  };
+
+  const lines = order
+    ? order.items.map((i, n) => ({
+        key: `${i.productId}-${n}`,
+        name: i.name,
+        image: i.image,
+        detail: `${i.color} / ${i.size} · Qty ${i.quantity}${i.customization ? " · Custom" : ""}`,
+        amount: i.price * i.quantity,
+      }))
+    : cart.map((i) => ({
+        key: i.key,
+        name: i.product.name,
+        image: i.product.image,
+        detail: `${i.color} / ${i.size} · Qty ${i.quantity}${i.customization ? " · Custom" : ""}`,
+        amount: i.product.price * i.quantity,
+      }));
+
   return (
     <main className="bg-secondary/40">
       <div className="mx-auto max-w-[1100px] px-5 py-10 sm:px-8 sm:py-16">
@@ -987,164 +1292,336 @@ export function CheckoutPage() {
             <h1 className="font-display text-4xl">{labels[step - 1]}</h1>
             <div className="mt-7">
               {step === 1 && (
-                <div className="grid gap-5">
-                  <FormField label="Full name">
-                    <Input placeholder="Amara Okafor" />
+                <div className="grid gap-1">
+                  <FormField label="Full name" err={errors["name"]}>
+                    <Input
+                      value={contact.name}
+                      autoComplete="name"
+                      onChange={(e) => setContact({ ...contact, name: e.target.value })}
+                    />
                   </FormField>
-                  <FormField label="Email">
-                    <Input type="email" placeholder="amara@example.com" />
+                  <FormField label="Email" err={errors["email"]}>
+                    <Input
+                      type="email"
+                      value={contact.email}
+                      autoComplete="email"
+                      onChange={(e) => setContact({ ...contact, email: e.target.value })}
+                    />
                   </FormField>
-                  <FormField label="Phone">
-                    <Input placeholder="+234 800 000 0000" />
+                  <FormField label="Phone" err={errors["phone"]}>
+                    <Input
+                      value={contact.phone}
+                      autoComplete="tel"
+                      onChange={(e) => setContact({ ...contact, phone: e.target.value })}
+                    />
                   </FormField>
                 </div>
               )}
               {step === 2 && (
-                <div className="grid gap-5">
-                  <FormField label="Address">
-                    <Input placeholder="14 Bourdillon Road" />
+                <div className="grid gap-1">
+                  <FormField label="Address" err={errors["address"]}>
+                    <Input
+                      value={delivery.address}
+                      autoComplete="street-address"
+                      placeholder="14 Bourdillon Road"
+                      onChange={(e) => setDelivery({ ...delivery, address: e.target.value })}
+                    />
                   </FormField>
                   <div className="grid gap-5 sm:grid-cols-2">
-                    <FormField label="City">
-                      <Input placeholder="Ikoyi" />
+                    <FormField label="City" err={errors["city"]}>
+                      <Input
+                        value={delivery.city}
+                        placeholder="Ikoyi"
+                        onChange={(e) => setDelivery({ ...delivery, city: e.target.value })}
+                      />
                     </FormField>
-                    <FormField label="State">
-                      <Select defaultValue="lagos">
-                        <SelectTrigger>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="lagos">Lagos</SelectItem>
-                          <SelectItem value="abuja">Abuja FCT</SelectItem>
-                          <SelectItem value="rivers">Rivers</SelectItem>
-                        </SelectContent>
-                      </Select>
+                    <FormField label="State" err={errors["state"]}>
+                      <Input
+                        value={delivery.state}
+                        onChange={(e) => setDelivery({ ...delivery, state: e.target.value })}
+                      />
                     </FormField>
                   </div>
-                  <FormField label="Delivery method">
-                    <label className="flex items-center gap-3 border border-luxury p-4">
-                      <input type="radio" defaultChecked />
-                      <MapPin className="size-4" />
-                      <span className="text-sm">Door delivery · 1–3 working days</span>
-                    </label>
+                  <FormField label="Delivery option" err={errors["locationId"]}>
+                    <div className="grid gap-2">
+                      {active.map((l) => (
+                        <label
+                          key={l.id}
+                          className={cn(
+                            "flex cursor-pointer items-center gap-3 border p-4",
+                            delivery.locationId === l.id && "border-luxury bg-secondary/60",
+                          )}
+                        >
+                          <input
+                            type="radio"
+                            name="location"
+                            checked={delivery.locationId === l.id}
+                            onChange={() => setDelivery({ ...delivery, locationId: l.id })}
+                          />
+                          <MapPin className="size-4 shrink-0" />
+                          <span className="min-w-0 flex-1 text-sm">
+                            {l.name}
+                            <span className="block text-xs text-muted-foreground">
+                              {l.description || l.address} · {l.eta}
+                            </span>
+                          </span>
+                          <span className="text-sm">{l.fee ? formatPrice(l.fee) : "Free"}</span>
+                        </label>
+                      ))}
+                      {!active.length && (
+                        <p className="text-sm text-muted-foreground">
+                          No delivery options are available right now. Please contact us.
+                        </p>
+                      )}
+                    </div>
                   </FormField>
                 </div>
               )}
               {step === 3 && (
                 <div>
                   <p className="text-sm text-muted-foreground">
-                    Review your pieces and delivery information before continuing.
+                    Review your pieces and delivery details. Placing the order reserves your pieces
+                    while you pay by bank transfer.
                   </p>
                   <div className="mt-6 space-y-4">
-                    {(cart.length ? cart : [previewItem]).map((i) => (
-                      <div key={i.product.id} className="flex items-center gap-4 border-b pb-4">
-                        <img src={i.product.image} alt="" className="size-16 object-cover" />
+                    {lines.map((i) => (
+                      <div key={i.key} className="flex items-center gap-4 border-b pb-4">
+                        <img src={i.image} alt="" className="size-16 object-cover" />
                         <div className="flex-1">
-                          <p className="font-display text-lg">{i.product.name}</p>
-                          <p className="text-xs text-muted-foreground">
-                            {i.color} / {i.size} · Qty {i.quantity}
-                          </p>
+                          <p className="font-display text-lg">{i.name}</p>
+                          <p className="text-xs text-muted-foreground">{i.detail}</p>
                         </div>
-                        <span className="text-sm">{formatPrice(i.product.price * i.quantity)}</span>
+                        <span className="text-sm">{formatPrice(i.amount)}</span>
                       </div>
                     ))}
                   </div>
+                  <div className="mt-6 grid gap-1 text-sm text-muted-foreground">
+                    <p>
+                      {contact.name} · {contact.phone}
+                    </p>
+                    <p>
+                      {delivery.address}, {delivery.city}, {delivery.state} · {loc?.name}
+                    </p>
+                  </div>
                 </div>
               )}
-              {step === 4 && (
-                <div className="border bg-secondary p-6">
-                  <p className="eyebrow">Manual bank transfer</p>
-                  <div className="mt-5 space-y-3">
-                    <SummaryRow label="Account name" value="KH Luxury" />
-                    <SummaryRow label="Bank" value="Example Bank" />
-                    <SummaryRow label="Account number" value="0000000000" />
-                  </div>
-                  <p className="mt-6 border-t pt-5 text-sm leading-6">
-                    After making your transfer, upload your payment receipt for verification.
-                  </p>
-                </div>
+              {step === 4 && order && (
+                <BankDetails
+                  amount={order.total}
+                  reference={order.id}
+                  instructions={settings.payment.paymentInstructions}
+                />
               )}
               {step === 5 && (
-                <div>
-                  <FormField label="Payment receipt">
-                    {receipt ? (
-                      <div className="flex items-center justify-between border border-luxury bg-secondary p-4">
-                        <span className="truncate text-sm">{receipt.name}</span>
-                        <Button variant="ghost" size="icon" onClick={() => setReceipt(null)}>
-                          <X />
-                        </Button>
-                      </div>
-                    ) : (
-                      <label className="flex min-h-44 cursor-pointer flex-col items-center justify-center border border-dashed border-luxury bg-secondary/50">
-                        <Upload />
-                        <span className="mt-3 text-sm">Upload transfer receipt</span>
-                        <span className="text-xs text-muted-foreground">JPG, PNG or PDF</span>
-                        <input
-                          type="file"
-                          className="sr-only"
-                          onChange={(e) => setReceipt(e.target.files?.[0] ?? null)}
-                        />
-                      </label>
-                    )}
-                  </FormField>
-                </div>
+                <ReceiptPicker
+                  value={receipt}
+                  onChange={(r) => {
+                    setReceipt(r);
+                    setErrors({});
+                  }}
+                  err={errors["receipt"]}
+                />
               )}
             </div>
-            <div className="mt-10 flex justify-between">
-              <Button variant="ghost" disabled={step === 1} onClick={() => setStep((s) => s - 1)}>
+            <div className="mt-10 flex justify-between gap-3">
+              <Button
+                variant="ghost"
+                disabled={step === 1 || step === 4 || busy}
+                onClick={() => setStep((s) => s - 1)}
+              >
                 Back
               </Button>
-              <Button
-                onClick={() => (step < 5 ? setStep((s) => s + 1) : navigate("/order-confirmation"))}
-              >
-                {step === 5 ? "Submit receipt" : "Continue"}
+              {step === 4 && order && (
+                <Button asChild variant="link" className="ml-auto">
+                  <Link to={`/account/orders/${encodeURIComponent(order.id)}`}>Pay later</Link>
+                </Button>
+              )}
+              <Button onClick={next} disabled={busy}>
+                {busy && <Loader2 className="animate-spin" />}
+                {step === 3
+                  ? "Place order"
+                  : step === 4
+                    ? "I have paid"
+                    : step === 5
+                      ? "Submit receipt"
+                      : "Continue"}
                 <ArrowRight />
               </Button>
             </div>
           </div>
-          <OrderSummary
-            subtotal={subtotal}
-            delivery={subtotal >= 150000 ? 0 : 5000}
-            vat={Math.round(subtotal * 0.075)}
-          />
+          <OrderSummary subtotal={subtotal} delivery={fee} vat={vat}>
+            {order && <p className="mt-2 text-xs text-muted-foreground">Order {order.id}</p>}
+          </OrderSummary>
         </div>
       </div>
     </main>
   );
 }
 
+function BankDetails({
+  amount,
+  reference,
+  instructions,
+}: {
+  amount: number;
+  reference: string;
+  instructions: string;
+}) {
+  const { settings } = useApp();
+  const p = settings.payment;
+  const missing = !p.bankName || !p.accountNumber;
+  return (
+    <div className="border bg-secondary p-6">
+      <p className="eyebrow">Manual bank transfer</p>
+      {missing ? (
+        <p className="mt-5 text-sm">
+          Our bank details are being updated. Please{" "}
+          <a
+            className="underline"
+            href={whatsappLink(
+              settings.whatsapp.whatsappNumber,
+              `Hello, I need payment details for order ${reference}.`,
+            )}
+            target="_blank"
+            rel="noreferrer"
+          >
+            message us on WhatsApp
+          </a>{" "}
+          for payment details.
+        </p>
+      ) : (
+        <div className="mt-5 space-y-3">
+          <SummaryRow label="Account name" value={p.accountName} />
+          <SummaryRow label="Bank" value={p.bankName} />
+          <SummaryRow label="Account number" value={p.accountNumber} />
+          <SummaryRow label="Amount" value={formatPrice(amount)} strong />
+          <SummaryRow label="Reference" value={reference} />
+        </div>
+      )}
+      <p className="mt-6 border-t pt-5 text-sm leading-6">{instructions}</p>
+    </div>
+  );
+}
+
+function ReceiptPicker({
+  value,
+  onChange,
+  err,
+}: {
+  value: { name: string; type: string; dataUrl: string } | null;
+  onChange: (r: { name: string; type: string; dataUrl: string } | null) => void;
+  err?: string | undefined;
+}) {
+  return (
+    <FormField label="Payment receipt" err={err}>
+      {value ? (
+        <div className="flex items-center justify-between gap-3 border border-luxury bg-secondary p-4">
+          {value.type.startsWith("image/") && (
+            <img src={value.dataUrl} alt="" className="size-14 object-cover" />
+          )}
+          <span className="min-w-0 flex-1 truncate text-sm">{value.name}</span>
+          <Button variant="ghost" size="icon" onClick={() => onChange(null)} aria-label="Remove">
+            <X />
+          </Button>
+        </div>
+      ) : (
+        <label className="flex min-h-44 cursor-pointer flex-col items-center justify-center border border-dashed border-luxury bg-secondary/50">
+          <Upload />
+          <span className="mt-3 text-sm">Upload transfer receipt</span>
+          <span className="text-xs text-muted-foreground">JPG, PNG or PDF · Up to 8 MB</span>
+          <input
+            type="file"
+            className="sr-only"
+            accept="image/*,.pdf"
+            onChange={async (e) => {
+              const f = e.target.files?.[0];
+              e.target.value = "";
+              if (!f) return;
+              const dataUrl = await readUpload(f, "image-or-pdf");
+              if (dataUrl) onChange({ name: f.name, type: f.type, dataUrl });
+            }}
+          />
+        </label>
+      )}
+    </FormField>
+  );
+}
+
+/** Finds the order named in ?order=, or the customer's latest order still waiting for a receipt. */
+function useOrderFromQuery(): { order?: Order; payment?: Payment } {
+  const [params] = useSearchParams();
+  const { orders, payments } = useApp();
+  const id = params.get("order");
+  const needsReceipt = (o: Order) =>
+    ["awaiting_receipt", "resubmit", "rejected"].includes(
+      payments.find((p) => p.id === o.paymentId)?.status ?? "",
+    );
+  const order = id ? orders.find((o) => o.id === id) : orders.find(needsReceipt);
+  const payment = order ? payments.find((p) => p.id === order.paymentId) : undefined;
+  return { ...(order ? { order } : {}), ...(payment ? { payment } : {}) };
+}
+
 export function OrderConfirmationPage() {
+  return (
+    <RequireAuth role="customer">
+      <OrderConfirmation />
+    </RequireAuth>
+  );
+}
+function OrderConfirmation() {
+  const { order, payment } = useOrderFromQuery();
+  if (!order)
+    return (
+      <main>
+        <PageIntro eyebrow="Orders" title="Order not found" />
+        <EmptyState
+          title="We could not find that order"
+          text="You can see all your orders in your account."
+          link="/account/orders"
+          action="My orders"
+        />
+      </main>
+    );
+  const expected = new Date(order.expectedDelivery);
   return (
     <main className="min-h-screen bg-secondary/50 px-5 py-20">
       <div className="mx-auto max-w-3xl bg-background p-8 text-center sm:p-14">
         <div className="mx-auto grid size-16 place-items-center rounded-full border border-luxury text-luxury">
           <Check className="size-7" />
         </div>
-        <p className="eyebrow mt-7">Order KH-260925-1051</p>
+        <p className="eyebrow mt-7">Order {order.id}</p>
         <h1 className="mt-3 font-display text-5xl">Order successful</h1>
         <p className="mx-auto mt-5 max-w-md text-sm leading-6 text-muted-foreground">
-          Your payment receipt has been submitted and is awaiting verification.
+          {payment?.status === "paid"
+            ? "Your payment has been confirmed. We will keep you updated as your order progresses."
+            : payment?.receipt
+              ? "Your payment receipt has been submitted and is awaiting verification."
+              : "Your order is reserved. Complete your bank transfer and upload the receipt."}
         </p>
-        <span className="mt-6 inline-block border border-luxury bg-secondary px-4 py-2 text-xs uppercase tracking-wider">
-          Pending verification
-        </span>
+        {payment && (
+          <span className="mt-6 inline-block border border-luxury bg-secondary px-4 py-2 text-xs uppercase tracking-wider">
+            {PAYMENT_LABELS[payment.status]}
+          </span>
+        )}
         <div className="mt-10 grid gap-px bg-border text-left sm:grid-cols-3">
           <div className="bg-background p-5">
             <p className="eyebrow">Total</p>
-            <p className="mt-2 font-display text-2xl">₦171,925</p>
+            <p className="mt-2 font-display text-2xl">{formatPrice(order.total)}</p>
           </div>
           <div className="bg-background p-5">
             <p className="eyebrow">Delivery</p>
-            <p className="mt-2 text-sm">Ikoyi, Lagos</p>
+            <p className="mt-2 text-sm">
+              {order.delivery.locationName}, {order.delivery.state}
+            </p>
           </div>
           <div className="bg-background p-5">
             <p className="eyebrow">Expected</p>
-            <p className="mt-2 text-sm">28–30 Sep 2026</p>
+            <p className="mt-2 text-sm">{formatDate(expected.toISOString())}</p>
           </div>
         </div>
         <div className="mt-8 flex flex-wrap justify-center gap-3">
           <Button asChild>
-            <Link to={`/account/orders/${"KH-260925-1051"}`}>Track order</Link>
+            <Link to={`/account/orders/${encodeURIComponent(order.id)}`}>Track order</Link>
           </Button>
           <Button asChild variant="outline">
             <Link to="/shop">Continue shopping</Link>
@@ -1157,47 +1634,95 @@ export function OrderConfirmationPage() {
 
 export function AccountPage({ view = "overview" }: { view?: string }) {
   return (
+    <RequireAuth role="customer">
+      <Account view={view} />
+    </RequireAuth>
+  );
+}
+function Account({ view }: { view: string }) {
+  const { user, orders, wishlist, reviews } = useApp();
+  const products = usePublicProducts();
+  const mine = reviews.filter((r) => r.customerId === user?.id);
+  const saved = products.filter((p) => wishlist.includes(p.id));
+  return (
     <main>
-      <PageIntro eyebrow="Welcome back, Amara" title={titleCase(view)} />
+      <PageIntro
+        eyebrow={`Welcome back, ${user?.name.split(" ")[0] ?? ""}`}
+        title={titleCase(view)}
+      />
       <div className="mx-auto grid max-w-[1300px] gap-10 px-5 pb-24 sm:px-8 lg:grid-cols-[230px_1fr]">
         <AccountNav />
         <div>
           {view === "overview" && (
             <>
               <div className="grid gap-px bg-border sm:grid-cols-3">
-                {[
-                  ["Total orders", "04"],
-                  ["Wishlist", "02"],
-                  ["Reviews", "03"],
-                ].map(([l, v]) => (
-                  <div className="bg-background p-6" key={l}>
+                {(
+                  [
+                    ["Total orders", orders.length, "/account/orders"],
+                    ["Wishlist", wishlist.length, "/account/wishlist"],
+                    ["Reviews", mine.length, "/account/reviews"],
+                  ] as const
+                ).map(([l, v, to]) => (
+                  <Link className="bg-background p-6 hover:bg-card" key={l} to={to}>
                     <p className="eyebrow">{l}</p>
-                    <p className="mt-2 font-display text-4xl">{v}</p>
-                  </div>
+                    <p className="mt-2 font-display text-4xl">{String(v).padStart(2, "0")}</p>
+                  </Link>
                 ))}
               </div>
               <h2 className="mt-12 font-display text-3xl">Recent orders</h2>
-              <OrderList />
+              <OrderList limit={5} />
             </>
           )}
           {view === "orders" && <OrderList />}
-          {view === "wishlist" && (
-            <div className="product-grid">
-              {products.slice(3, 5).map((p) => (
-                <ProductCard key={p.id} product={p} />
-              ))}
-            </div>
+          {view === "wishlist" &&
+            (saved.length ? (
+              <div className="product-grid">
+                {saved.map((p) => (
+                  <ProductCard key={p.id} product={p} />
+                ))}
+              </div>
+            ) : (
+              <EmptyState
+                title="Nothing saved yet"
+                text="Use the heart on any piece to keep it here."
+                link="/shop"
+                action="Browse collection"
+              />
+            ))}
+          {view === "profile" && <ProfileForm />}
+          {view === "reviews" && (
+            <>
+              <ReviewForm />
+              {mine.length > 0 && (
+                <>
+                  <h2 className="mt-14 font-display text-3xl">Your reviews</h2>
+                  <div className="mt-5 border-t">
+                    {mine.map((r) => (
+                      <div key={r.id} className="border-b py-5">
+                        <div className="flex items-center justify-between gap-4">
+                          <Link to={`/product/${r.productId}`} className="text-sm font-medium">
+                            {products.find((p) => p.id === r.productId)?.name ?? r.productId}
+                          </Link>
+                          <span className="status">
+                            {r.status === "approved"
+                              ? "Published"
+                              : r.status === "pending"
+                                ? "Awaiting approval"
+                                : "Not published"}
+                          </span>
+                        </div>
+                        <div className="mt-2">
+                          <Stars rating={r.rating} />
+                        </div>
+                        <p className="mt-2 text-sm text-muted-foreground">{r.text}</p>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+            </>
           )}
-          {view === "profile" && (
-            <SimpleForm title="Profile details" fields={["Full name", "Email", "Phone"]} />
-          )}{" "}
-          {view === "reviews" && <ReviewForm />}
-          {view === "settings" && (
-            <SimpleForm
-              title="Account settings"
-              fields={["Preferred size", "Delivery city", "Email preferences"]}
-            />
-          )}
+          {view === "settings" && <PasswordForm />}
         </div>
       </div>
     </main>
@@ -1223,99 +1748,196 @@ function AccountNav() {
     </nav>
   );
 }
-function OrderList() {
+function OrderList({ limit }: { limit?: number }) {
+  const { orders, payments } = useApp();
+  const list = limit ? orders.slice(0, limit) : orders;
+  if (!list.length)
+    return (
+      <EmptyState
+        title="No orders yet"
+        text="When you place an order it will appear here."
+        link="/shop"
+        action="Start shopping"
+      />
+    );
   return (
     <div className="mt-5 border-t">
-      {orders.map((o) => (
-        <Link
-          key={o.id}
-          to={`/account/orders/${o.id}`}
-          className="grid grid-cols-[1fr_auto] gap-4 border-b py-5 sm:grid-cols-[1fr_1fr_1fr_auto]"
-        >
-          <div>
-            <p className="text-sm font-medium">{o.id}</p>
-            <p className="text-xs text-muted-foreground">{o.date}</p>
-          </div>
-          <span className="hidden text-sm sm:block">
-            {o.items} item{o.items > 1 ? "s" : ""}
-          </span>
-          <span className="hidden text-sm sm:block">{formatPrice(o.amount)}</span>
-          <span className="status">{o.status}</span>
-        </Link>
-      ))}
+      {list.map((o) => {
+        const count = o.items.reduce((n, i) => n + i.quantity, 0);
+        const pay = payments.find((p) => p.id === o.paymentId);
+        return (
+          <Link
+            key={o.id}
+            to={`/account/orders/${encodeURIComponent(o.id)}`}
+            className="grid grid-cols-[1fr_auto] gap-4 border-b py-5 sm:grid-cols-[1fr_1fr_1fr_auto]"
+          >
+            <div>
+              <p className="text-sm font-medium">{o.id}</p>
+              <p className="text-xs text-muted-foreground">{formatDate(o.date)}</p>
+            </div>
+            <span className="hidden text-sm sm:block">
+              {count} item{count > 1 ? "s" : ""}
+              {pay && (
+                <span className="block text-xs text-muted-foreground">
+                  {PAYMENT_LABELS[pay.status]}
+                </span>
+              )}
+            </span>
+            <span className="hidden text-sm sm:block">{formatPrice(o.total)}</span>
+            <span className="status">{ORDER_STEP_LABELS[o.status]}</span>
+          </Link>
+        );
+      })}
     </div>
   );
 }
+
 export function OrderDetailsPage({ orderId }: { orderId: string }) {
-  const order = orders.find((o) => o.id === orderId) ?? orders[0]!;
-  const steps = [
-    "Order placed",
-    "Payment verification",
-    "Payment confirmed",
-    "Processing",
-    "Out for delivery",
-    "Delivered",
-  ];
-  const featuredProduct = products[0]!;
+  return (
+    <RequireAuth role="customer">
+      <OrderDetails orderId={orderId} />
+    </RequireAuth>
+  );
+}
+function OrderDetails({ orderId }: { orderId: string }) {
+  const { orders, payments } = useApp();
+  const order = orders.find((o) => o.id === orderId);
+  if (!order)
+    return (
+      <main>
+        <PageIntro eyebrow="Orders" title="Order not found" />
+        <EmptyState
+          title="We could not find that order"
+          text="It may belong to a different account."
+          link="/account/orders"
+          action="My orders"
+        />
+      </main>
+    );
+  const payment = payments.find((p) => p.id === order.paymentId);
+  const current = ORDER_STEPS.indexOf(order.status);
+  const needsReceipt =
+    payment && ["awaiting_receipt", "resubmit", "rejected"].includes(payment.status);
   return (
     <main>
       <PageIntro
-        eyebrow={order.date}
+        eyebrow={formatDate(order.date)}
         title={`Order ${order.id}`}
         text="Follow your order from confirmation to delivery."
       />
       <div className="mx-auto grid max-w-[1200px] gap-10 px-5 pb-24 sm:px-8 lg:grid-cols-[1fr_350px]">
         <div>
+          {needsReceipt && (
+            <div className="mb-10 border border-luxury bg-secondary p-5">
+              <p className="text-sm font-medium">
+                {payment.status === "awaiting_receipt"
+                  ? "We are waiting for your payment receipt."
+                  : "Your payment needs attention. Please upload a new receipt."}
+              </p>
+              {payment.notes.length > 0 && payment.status !== "awaiting_receipt" && (
+                <p className="mt-1 text-xs text-muted-foreground">{payment.notes.at(-1)?.text}</p>
+              )}
+              <div className="mt-4 flex flex-wrap gap-2">
+                <Button asChild size="sm">
+                  <Link to={`/payment-receipt?order=${encodeURIComponent(order.id)}`}>
+                    Upload receipt
+                  </Link>
+                </Button>
+                <Button asChild size="sm" variant="outline">
+                  <Link to={`/payment-instructions?order=${encodeURIComponent(order.id)}`}>
+                    Payment details
+                  </Link>
+                </Button>
+              </div>
+            </div>
+          )}
           <h2 className="font-display text-3xl">Order progress</h2>
           <div className="mt-7">
-            {steps.map((s, i) => (
+            {ORDER_STEPS.map((s, i) => (
               <div key={s} className="grid grid-cols-[28px_1fr] gap-3">
                 <div className="flex flex-col items-center">
                   <span
                     className={cn(
                       "grid size-6 place-items-center rounded-full border",
-                      i < 4 ? "border-luxury bg-luxury text-primary" : "border-border",
+                      i <= current ? "border-luxury bg-luxury text-primary" : "border-border",
                     )}
                   >
-                    {i < 4 && <Check className="size-3" />}
+                    {i <= current && <Check className="size-3" />}
                   </span>
-                  {i < steps.length - 1 && <span className="h-10 w-px bg-border" />}
+                  {i < ORDER_STEPS.length - 1 && <span className="h-10 w-px bg-border" />}
                 </div>
-                <p className={cn("pt-1 text-sm", i === 3 && "font-semibold")}>{s}</p>
+                <p className={cn("pt-1 text-sm", i === current && "font-semibold")}>
+                  {ORDER_STEP_LABELS[s]}
+                </p>
               </div>
             ))}
           </div>
           <h2 className="mt-12 font-display text-3xl">Items</h2>
-          <div className="mt-4 flex gap-4 border-y py-5">
-            <img src={featuredProduct.image} alt="" className="size-24 object-cover" />
-            <div>
-              <p className="font-display text-xl">{featuredProduct.name}</p>
-              <p className="mt-1 text-xs text-muted-foreground">Obsidian / M · Qty 2</p>
-              <p className="mt-3 text-sm">{formatPrice(featuredProduct.price * 2)}</p>
-            </div>
+          <div className="mt-4 border-t">
+            {order.items.map((i, n) => (
+              <div key={`${i.productId}-${n}`} className="flex gap-4 border-b py-5">
+                <img src={i.image} alt="" className="size-24 object-cover" />
+                <div className="min-w-0">
+                  <Link to={`/product/${i.productId}`} className="font-display text-xl">
+                    {i.name}
+                  </Link>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {i.color} / {i.size} · Qty {i.quantity}
+                  </p>
+                  {i.customization && (
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Custom: {i.customization.instructions || i.customization.designName}
+                    </p>
+                  )}
+                  <p className="mt-3 text-sm">{formatPrice(i.price * i.quantity)}</p>
+                </div>
+              </div>
+            ))}
           </div>
+          {payment && payment.notes.length > 0 && (
+            <>
+              <h2 className="mt-12 font-display text-3xl">Payment updates</h2>
+              <div className="mt-4 border-t">
+                {[...payment.notes].reverse().map((note, i) => (
+                  <div key={i} className="border-b py-3 text-sm">
+                    <p>{note.text}</p>
+                    <p className="text-xs text-muted-foreground">{formatDate(note.at)}</p>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
         </div>
-        <aside className="border p-6">
+        <aside className="h-fit border p-6">
           <h2 className="font-display text-2xl">Delivery details</h2>
           <p className="mt-5 text-sm leading-6 text-muted-foreground">
-            Amara Okafor
+            {order.contact.name}
             <br />
-            14 Bourdillon Road
+            {order.delivery.address}
             <br />
-            Ikoyi, Lagos
+            {order.delivery.city}, {order.delivery.state}
             <br />
-            +234 800 000 0000
+            {order.delivery.locationName}
+            <br />
+            {order.contact.phone}
           </p>
-          <div className="mt-6 border-t pt-5">
-            <SummaryRow label="Subtotal" value={formatPrice(order.amount - 10000)} />
-            <div className="mt-3">
-              <SummaryRow label="VAT & delivery" value={formatPrice(10000)} />
-            </div>
-            <div className="mt-4 border-t pt-4">
-              <SummaryRow label="Total" value={formatPrice(order.amount)} strong />
+          <p className="mt-4 text-xs text-muted-foreground">
+            Expected by {formatDate(order.expectedDelivery)}
+          </p>
+          <div className="mt-6 space-y-3 border-t pt-5">
+            <SummaryRow label="Subtotal" value={formatPrice(order.subtotal)} />
+            <SummaryRow label="VAT (7.5%)" value={formatPrice(order.vat)} />
+            <SummaryRow
+              label="Delivery"
+              value={order.deliveryFee ? formatPrice(order.deliveryFee) : "Complimentary"}
+            />
+            <div className="border-t pt-4">
+              <SummaryRow label="Total" value={formatPrice(order.total)} strong />
             </div>
           </div>
-          <span className="mt-6 inline-block status">{order.payment}</span>
+          {payment && (
+            <span className="mt-6 inline-block status">{PAYMENT_LABELS[payment.status]}</span>
+          )}
         </aside>
       </div>
     </main>
@@ -1323,20 +1945,69 @@ export function OrderDetailsPage({ orderId }: { orderId: string }) {
 }
 
 export function ReviewForm() {
+  const { user, orders, addReview } = useApp();
+  const { requireCustomer } = useStore();
+  const products = usePublicProducts();
+  const [params] = useSearchParams();
+  // Pieces the customer has ordered come first in the list.
+  const bought = new Set(orders.flatMap((o) => o.items.map((i) => i.productId)));
+  const options = [
+    ...products.filter((p) => bought.has(p.id)),
+    ...products.filter((p) => !bought.has(p.id)),
+  ];
+  const [productId, setProductId] = useState(params.get("product") ?? "");
   const [rating, setRating] = useState(5);
+  const [text, setText] = useState("");
+  const [image, setImage] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const selected = productId || options[0]?.id || "";
   return (
     <form
       className="max-w-2xl"
-      onSubmit={(e) => {
+      onSubmit={async (e) => {
         e.preventDefault();
-        toast.success("Thank you for your review");
+        if (!requireCustomer()) return;
+        if (!selected) { toast.error("Choose a product to review."); return; }
+        if (text.trim().length < 3) { toast.error("Write a few words about the product."); return; }
+        setBusy(true);
+        const ok = await addReview({
+          productId: selected,
+          rating,
+          text: text.trim(),
+          ...(image ? { image } : {}),
+        });
+        setBusy(false);
+        if (ok) {
+          toast.success("Thank you. Your review will appear once our team approves it.");
+          setText("");
+          setImage(null);
+          setRating(5);
+        }
       }}
     >
       <h2 className="font-display text-3xl">Share your experience</h2>
+      {!user && (
+        <p className="mt-3 text-sm text-muted-foreground">You will be asked to sign in first.</p>
+      )}
+      <FormField label="Product">
+        <Select value={selected} onValueChange={setProductId}>
+          <SelectTrigger className="h-12">
+            <SelectValue placeholder="Choose a product" />
+          </SelectTrigger>
+          <SelectContent>
+            {options.map((p) => (
+              <SelectItem key={p.id} value={p.id}>
+                {p.name}
+                {bought.has(p.id) ? " · Purchased" : ""}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </FormField>
       <FormField label="Rating">
         <div className="flex gap-2">
           {[1, 2, 3, 4, 5].map((n) => (
-            <button type="button" key={n} onClick={() => setRating(n)}>
+            <button type="button" key={n} onClick={() => setRating(n)} aria-label={`${n} stars`}>
               <Star className={cn("size-6", n <= rating && "fill-current text-luxury")} />
             </button>
           ))}
@@ -1345,13 +2016,139 @@ export function ReviewForm() {
       <FormField label="Your review">
         <Textarea
           className="min-h-36"
+          maxLength={2000}
+          value={text}
+          onChange={(e) => setText(e.target.value)}
           placeholder="Tell us about the fit, feel, and experience..."
         />
       </FormField>
       <FormField label="Optional image">
-        <Input type="file" accept="image/*" />
+        {image ? (
+          <div className="flex items-center gap-3">
+            <img src={image} alt="" className="size-20 object-cover" />
+            <Button type="button" variant="ghost" size="sm" onClick={() => setImage(null)}>
+              Remove
+            </Button>
+          </div>
+        ) : (
+          <Input
+            type="file"
+            accept="image/*"
+            onChange={async (e) => {
+              const f = e.target.files?.[0];
+              e.target.value = "";
+              if (f) setImage(await readUpload(f, "image"));
+            }}
+          />
+        )}
       </FormField>
-      <Button type="submit">Submit review</Button>
+      <Button type="submit" disabled={busy}>
+        {busy && <Loader2 className="animate-spin" />}
+        Submit review
+      </Button>
+    </form>
+  );
+}
+
+function Stars({ rating }: { rating: number }) {
+  return (
+    <span className="flex gap-1 text-luxury" aria-label={`${rating} out of 5`}>
+      {Array.from({ length: 5 }).map((_, j) => (
+        <Star key={j} className={cn("size-3", j < rating ? "fill-current" : "opacity-30")} />
+      ))}
+    </span>
+  );
+}
+
+function ProfileForm() {
+  const { user, updateProfile } = useApp();
+  const [f, setF] = useState({ name: user?.name ?? "", email: user?.email ?? "", phone: user?.phone ?? "" });
+  const [busy, setBusy] = useState(false);
+  return (
+    <form
+      className="max-w-2xl"
+      onSubmit={async (e) => {
+        e.preventDefault();
+        if (f.name.trim().length < 2) { toast.error("Enter your full name"); return; }
+        if (!emailOk(f.email)) { toast.error("Enter a valid email"); return; }
+        setBusy(true);
+        const ok = await updateProfile({
+          name: f.name.trim(),
+          email: f.email.trim(),
+          phone: f.phone.trim(),
+        });
+        setBusy(false);
+        if (ok) toast.success("Profile updated");
+      }}
+    >
+      <h2 className="font-display text-3xl">Profile details</h2>
+      <FormField label="Full name">
+        <Input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} />
+      </FormField>
+      <FormField label="Email">
+        <Input type="email" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} />
+      </FormField>
+      <FormField label="Phone">
+        <Input value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value })} />
+      </FormField>
+      <Button className="mt-6" type="submit" disabled={busy}>
+        {busy && <Loader2 className="animate-spin" />}
+        Save changes
+      </Button>
+    </form>
+  );
+}
+
+export function PasswordForm({ title = "Change password" }: { title?: string }) {
+  const { changePassword } = useApp();
+  const [f, setF] = useState({ current: "", next: "", confirm: "" });
+  const [busy, setBusy] = useState(false);
+  return (
+    <form
+      className="max-w-2xl"
+      onSubmit={async (e) => {
+        e.preventDefault();
+        if (!f.current) { toast.error("Enter your current password"); return; }
+        if (f.next.length < 8) { toast.error("New password must be at least 8 characters"); return; }
+        if (f.next !== f.confirm) { toast.error("New passwords do not match"); return; }
+        setBusy(true);
+        const ok = await changePassword(f.current, f.next);
+        setBusy(false);
+        if (ok) {
+          toast.success("Password changed");
+          setF({ current: "", next: "", confirm: "" });
+        }
+      }}
+    >
+      <h2 className="font-display text-3xl">{title}</h2>
+      <FormField label="Current password">
+        <Input
+          type="password"
+          autoComplete="current-password"
+          value={f.current}
+          onChange={(e) => setF({ ...f, current: e.target.value })}
+        />
+      </FormField>
+      <FormField label="New password">
+        <Input
+          type="password"
+          autoComplete="new-password"
+          value={f.next}
+          onChange={(e) => setF({ ...f, next: e.target.value })}
+        />
+      </FormField>
+      <FormField label="Confirm new password">
+        <Input
+          type="password"
+          autoComplete="new-password"
+          value={f.confirm}
+          onChange={(e) => setF({ ...f, confirm: e.target.value })}
+        />
+      </FormField>
+      <Button className="mt-6" type="submit" disabled={busy}>
+        {busy && <Loader2 className="animate-spin" />}
+        Update password
+      </Button>
     </form>
   );
 }
@@ -1403,8 +2200,15 @@ export function EditorialPage({ type }: { type: "about" | "contact" | "terms" | 
         </section>
       </main>
     );
-  if (type === "contact")
-    return (
+  if (type === "contact") return <ContactPage />;
+  const isTerms = type === "terms";
+  return <PolicyPage isTerms={isTerms} />;
+}
+
+function ContactPage() {
+  const { settings } = useApp();
+  const { brand, whatsapp } = settings;
+  return (
       <main>
         <PageIntro
           eyebrow="Private concierge"
@@ -1413,22 +2217,37 @@ export function EditorialPage({ type }: { type: "about" | "contact" | "terms" | 
         />
         <div className="mx-auto grid max-w-[1100px] gap-12 px-5 pb-24 sm:px-8 lg:grid-cols-2">
           <div className="space-y-8">
-            <ContactLine title="WhatsApp" value="+234 800 KH LUXURY" />
-            <ContactLine title="Email" value="concierge@khluxury.com" />
-            <ContactLine title="Social" value="@khluxury" />
+            <ContactLine
+              title="WhatsApp"
+              value={whatsapp.whatsappNumber}
+              href={whatsappLink(whatsapp.whatsappNumber, whatsapp.defaultGreeting)}
+            />
+            {brand.contactEmail && (
+              <ContactLine
+                title="Email"
+                value={brand.contactEmail}
+                href={`mailto:${brand.contactEmail}`}
+              />
+            )}
+            {brand.instagramHandle && (
+              <ContactLine
+                title="Social"
+                value={brand.instagramHandle}
+                href={`https://www.instagram.com/${brand.instagramHandle.replace(/^@/, "")}`}
+              />
+            )}
             <p className="max-w-sm text-sm leading-7 text-muted-foreground">
-              Concierge hours: Monday–Saturday, 9:00–18:00 WAT. We typically respond within one
-              working day.
+              Concierge hours: {whatsapp.businessHours}. We typically respond within one working
+              day.
             </p>
           </div>
-          <SimpleForm
-            title="Send an enquiry"
-            fields={["Full name", "Email", "Phone", "How can we help?"]}
-          />
+          <ContactForm />
         </div>
       </main>
     );
-  const isTerms = type === "terms";
+}
+
+function PolicyPage({ isTerms }: { isTerms: boolean }) {
   return (
     <main>
       <PageIntro
@@ -1536,9 +2355,34 @@ export function AuthPage({ mode }: { mode: "login" | "register" | "forgot" }) {
 
 export function PaymentPage({ receipt = false }: { receipt?: boolean }) {
   return (
+    <RequireAuth role="customer">
+      <Payment_ receipt={receipt} />
+    </RequireAuth>
+  );
+}
+function Payment_({ receipt }: { receipt: boolean }) {
+  const { settings, submitReceipt } = useApp();
+  const navigate = useNavigate();
+  const { order, payment } = useOrderFromQuery();
+  const [file, setFile] = useState<{ name: string; type: string; dataUrl: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  if (!order || !payment)
+    return (
+      <main>
+        <PageIntro eyebrow="Payments" title="No payment due" />
+        <EmptyState
+          title="Nothing is waiting for payment"
+          text="All your orders are paid or awaiting verification."
+          link="/account/orders"
+          action="My orders"
+        />
+      </main>
+    );
+  const done = payment.status === "paid" || payment.status === "pending_verification";
+  return (
     <main>
       <PageIntro
-        eyebrow="Order KH-260925-1051"
+        eyebrow={`Order ${order.id} · ${formatPrice(order.total)}`}
         title={receipt ? "Upload your receipt" : "Complete your transfer"}
         text={
           receipt
@@ -1547,80 +2391,126 @@ export function PaymentPage({ receipt = false }: { receipt?: boolean }) {
         }
       />
       <div className="mx-auto max-w-2xl px-5 pb-24 sm:px-8">
-        {receipt ? (
+        {done ? (
+          <div className="border bg-secondary p-8 text-sm">
+            <p>
+              This payment is <strong>{PAYMENT_LABELS[payment.status].toLowerCase()}</strong>.
+            </p>
+            <Button asChild className="mt-5">
+              <Link to={`/account/orders/${encodeURIComponent(order.id)}`}>View order</Link>
+            </Button>
+          </div>
+        ) : receipt ? (
           <form
-            onSubmit={(e) => {
+            onSubmit={async (e) => {
               e.preventDefault();
-              toast.success("Receipt submitted for verification");
+              if (!file) { toast.error("Choose your payment receipt first."); return; }
+              setBusy(true);
+              const ok = await submitReceipt(order.id, file);
+              setBusy(false);
+              if (ok) {
+                toast.success("Receipt submitted for verification");
+                navigate(`/order-confirmation?order=${encodeURIComponent(order.id)}`);
+              }
             }}
           >
-            <label className="flex min-h-52 cursor-pointer flex-col items-center justify-center border border-dashed border-luxury bg-secondary">
-              <Upload />
-              <span className="mt-4">Choose payment receipt</span>
-              <input type="file" className="sr-only" />
-            </label>
-            <Button type="submit" className="mt-6 w-full">
+            <ReceiptPicker value={file} onChange={setFile} />
+            <Button type="submit" className="mt-6 w-full" disabled={busy}>
+              {busy && <Loader2 className="animate-spin" />}
               Submit receipt
             </Button>
           </form>
         ) : (
-          <div className="border bg-secondary p-8">
-            <SummaryRow label="Account name" value="KH Luxury" />
-            <div className="mt-4">
-              <SummaryRow label="Bank" value="Example Bank" />
-            </div>
-            <div className="mt-4">
-              <SummaryRow label="Account number" value="0000000000" />
-            </div>
-            <div className="mt-7 border-t pt-6">
-              <p className="text-sm">
-                After making your transfer, upload your payment receipt for verification.
-              </p>
-              <Button asChild className="mt-5 w-full">
-                <Link to="/payment-receipt">Upload receipt</Link>
-              </Button>
-            </div>
-          </div>
+          <>
+            <BankDetails
+              amount={order.total}
+              reference={order.id}
+              instructions={settings.payment.paymentInstructions}
+            />
+            <Button asChild className="mt-5 w-full">
+              <Link to={`/payment-receipt?order=${encodeURIComponent(order.id)}`}>
+                Upload receipt
+              </Link>
+            </Button>
+          </>
         )}
       </div>
     </main>
   );
 }
 
-function FormField({ label, children }: { label: string; children: React.ReactNode }) {
+function FormField({
+  label,
+  err,
+  children,
+}: {
+  label: string;
+  err?: string | undefined;
+  children: React.ReactNode;
+}) {
   return (
     <div className="mt-5">
       <Label className="mb-2 block text-xs uppercase tracking-wider">{label}</Label>
       {children}
+      {err && <p className="mt-1 text-xs text-destructive">{err}</p>}
     </div>
   );
 }
-function SimpleForm({ title, fields }: { title: string; fields: string[] }) {
+/** Enquiries go straight to the concierge on WhatsApp with the details pre-filled. */
+function ContactForm() {
+  const { settings, user } = useApp();
+  const [f, setF] = useState({ name: user?.name ?? "", email: user?.email ?? "", phone: user?.phone ?? "", message: "" });
   return (
     <form
       className="max-w-2xl"
       onSubmit={(e) => {
         e.preventDefault();
-        toast.success("Changes saved");
+        if (f.name.trim().length < 2) { toast.error("Enter your name"); return; }
+        if (f.message.trim().length < 5) { toast.error("Tell us how we can help"); return; }
+        const text = `Hello KH Luxury, I'm ${f.name.trim()}.\n\n${f.message.trim()}\n\n${[f.email, f.phone].filter(Boolean).join(" · ")}`;
+        window.open(whatsappLink(settings.whatsapp.whatsappNumber, text), "_blank", "noopener");
       }}
     >
-      <h2 className="font-display text-3xl">{title}</h2>
-      {fields.map((f) => (
-        <FormField key={f} label={f}>
-          {f.includes("help") ? <Textarea className="min-h-32" /> : <Input />}
-        </FormField>
-      ))}
+      <h2 className="font-display text-3xl">Send an enquiry</h2>
+      <FormField label="Full name">
+        <Input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} />
+      </FormField>
+      <FormField label="Email">
+        <Input type="email" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} />
+      </FormField>
+      <FormField label="Phone">
+        <Input value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value })} />
+      </FormField>
+      <FormField label="How can we help?">
+        <Textarea
+          className="min-h-32"
+          maxLength={1500}
+          value={f.message}
+          onChange={(e) => setF({ ...f, message: e.target.value })}
+        />
+      </FormField>
       <Button className="mt-6" type="submit">
-        Save changes
+        Send on WhatsApp <ArrowRight />
       </Button>
     </form>
   );
 }
-function ContactLine({ title, value }: { title: string; value: string }) {
+function ContactLine({ title, value, href }: { title: string; value: string; href?: string }) {
   return (
     <div className="border-b pb-6">
       <p className="eyebrow">{title}</p>
-      <p className="mt-2 font-display text-3xl">{value}</p>
+      {href ? (
+        <a
+          href={href}
+          target="_blank"
+          rel="noreferrer"
+          className="mt-2 block font-display text-3xl hover:text-luxury"
+        >
+          {value}
+        </a>
+      ) : (
+        <p className="mt-2 font-display text-3xl">{value}</p>
+      )}
     </div>
   );
 }

@@ -5,15 +5,14 @@ Build the complete frontend of a premium luxury fashion e-commerce application f
 KH LUXURY
 
 IMPORTANT:
-This prompt is ONLY for the frontend/UI/UX.
-Do NOT set up Supabase yet.
-Do NOT create the database yet.
-Do NOT implement backend APIs yet.
+This prompt focuses on the frontend/UI/UX.
+Persistent data is provided by the project's Node.js + Express API backed by MongoDB.
+Do not connect the frontend directly to the database.
 Do NOT implement real authentication yet.
 Do NOT implement real payment processing yet.
 For now, focus entirely on creating the complete frontend experience, navigation, pages, components, responsive design, interactions and visual system.
 Use realistic mock data where necessary so the entire interface can be previewed and tested.
-The frontend must be structured cleanly so that Supabase can be connected later without rebuilding the UI.
+The frontend should use the existing API layer so the database implementation remains server-side.
 
 ==================================================
 BRAND LOGO
@@ -400,7 +399,7 @@ The frontend should include:
 - Add to Cart button
 
 For now, the upload functionality can use frontend/mock behavior.
-The actual secure file storage will be implemented later using Supabase.
+Uploaded files are stored by the API under its local uploads directory.
 
 ==================================================
 CHECKOUT
@@ -591,7 +590,7 @@ ADMIN FRONTEND
 Create the complete ADMIN UI as well.
 Do not implement real admin authentication yet.
 
-Create the frontend screens that will later connect to Supabase.
+Create frontend screens that use the existing API where available.
 
 Admin pages:
 Dashboard
@@ -790,7 +789,7 @@ No Products
 IMPORTANT FRONTEND RULE
 ==================================================
 
-Do NOT connect Supabase yet.
+Do not add a direct database client to the frontend.
 Do NOT create database tables.
 Do NOT create RLS policies.
 Do NOT implement real authentication.
@@ -798,7 +797,7 @@ Do NOT implement real payment processing.
 Do NOT create backend APIs.
 
 Use clean mock data and frontend state where necessary.
-However, structure the components and data models in a way that makes replacing mock data with Supabase later straightforward.
+However, structure the components and data models in a way that makes replacing mock data with API data straightforward.
 
 ==================================================
 FINAL FRONTEND GOAL
@@ -821,7 +820,7 @@ Responsive design
 Smooth interactions
 Clean architecture
 
-The result should be a complete frontend foundation ready for Supabase integration later.
+The result should be a complete frontend foundation for the existing MongoDB-backed API.
 
 This project was built with [Lovable](https://lovable.dev).
 

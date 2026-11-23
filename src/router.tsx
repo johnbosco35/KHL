@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { Loader2 } from "lucide-react";
 import {
   createBrowserRouter,
   Link,
@@ -48,18 +49,17 @@ import {
 import { SiteFooter, SiteHeader, StoreProvider, WhatsAppButton } from "@/components/kh-store";
 import { Toaster } from "@/components/ui/sonner";
 import { reportLovableError } from "@/lib/lovable-error-reporting";
-import { products } from "@/lib/mock-data";
+import { useApp } from "@/lib/app-store";
+import type { Product } from "@/lib/mock-data";
 
 function RootLayout() {
   const { pathname } = useLocation();
   const isAdmin = pathname.startsWith("/admin");
 
-  useEffect(() => {
-    document.title = getPageTitle(pathname);
-  }, [pathname]);
-
   return (
     <StoreProvider>
+      <PageTitle />
+      <ConnectionNotice />
       {!isAdmin && <SiteHeader />}
       <Outlet />
       {!isAdmin && (
@@ -74,7 +74,33 @@ function RootLayout() {
   );
 }
 
-function getPageTitle(pathname: string): string {
+function PageTitle() {
+  const { pathname } = useLocation();
+  const { products } = useApp();
+  useEffect(() => {
+    document.title = getPageTitle(pathname, products);
+  }, [pathname, products]);
+  return null;
+}
+
+/** Shown when the API cannot be reached, so an empty shop isn't mistaken for "no products". */
+function ConnectionNotice() {
+  const { loadError, refresh } = useApp();
+  if (!loadError) return null;
+  return (
+    <div
+      role="alert"
+      className="flex flex-wrap items-center justify-center gap-3 bg-destructive px-4 py-2 text-center text-xs text-destructive-foreground"
+    >
+      {loadError}
+      <button className="underline" onClick={() => void refresh()}>
+        Retry
+      </button>
+    </div>
+  );
+}
+
+function getPageTitle(pathname: string, products: Product[]): string {
   const titles: Record<string, string> = {
     "/": "KH Luxury — Modern African Luxury",
     "/about": "About KH Luxury — Modern African Fashion",
@@ -179,7 +205,16 @@ function RouteErrorPage() {
 
 function ProductRoute() {
   const { productId } = useParams();
-  const product = products.find((item) => item.id === productId);
+  const { products, ready, user } = useApp();
+  const product = products.find(
+    (item) => item.id === productId && (item.status === "active" || user?.role === "admin"),
+  );
+  if (!ready)
+    return (
+      <div className="grid min-h-[50vh] place-items-center">
+        <Loader2 className="size-5 animate-spin text-luxury" />
+      </div>
+    );
   return product ? <ProductPage product={product} /> : <NotFoundPage />;
 }
 

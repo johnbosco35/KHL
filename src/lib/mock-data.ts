@@ -50,6 +50,8 @@ export type Review = {
   date: string;
   status: ReviewStatus;
   image?: string;
+  /** Reviewer display name (sent by the API). */
+  author?: string;
 };
 export type Role = "customer" | "admin";
 export type User = {
@@ -57,7 +59,8 @@ export type User = {
   name: string;
   email: string;
   phone: string;
-  password: string;
+  /** Only present in local seed data; the API never sends passwords. */
+  password?: string;
   role: Role;
   createdAt: string;
   status: "active" | "suspended";
@@ -146,6 +149,42 @@ export type Payment = {
   receipt?: Receipt;
   notes: { at: string; text: string }[];
 };
+
+// ---------- Store settings (edited in /admin/settings/*) ----------
+export type Settings = {
+  brand: { brandName: string; contactEmail: string; brandStatement: string; instagramHandle: string };
+  payment: {
+    accountName: string;
+    bankName: string;
+    accountNumber: string;
+    paymentInstructions: string;
+  };
+  whatsapp: { whatsappNumber: string; defaultGreeting: string; businessHours: string };
+};
+export type SettingsKey = keyof Settings;
+export const defaultSettings: Settings = {
+  brand: {
+    brandName: "KH Luxury",
+    contactEmail: "concierge@khluxury.com",
+    brandStatement: "Modern African luxury, shaped with confidence and made for a considered life.",
+    instagramHandle: "@khluxury",
+  },
+  payment: {
+    accountName: "KH Luxury",
+    bankName: "",
+    accountNumber: "",
+    paymentInstructions:
+      "Transfer the exact order total, then upload your receipt. Your order is confirmed once our team verifies the payment.",
+  },
+  whatsapp: {
+    whatsappNumber: "+2348100234233",
+    defaultGreeting: "Hello KH Luxury, I would like help with an order.",
+    businessHours: "Mon–Sat, 9am–6pm WAT",
+  },
+};
+/** wa.me link for a WhatsApp number in any common format. */
+export const whatsappLink = (number: string, text?: string) =>
+  `https://wa.me/${number.replace(/[^\d]/g, "")}${text ? `?text=${encodeURIComponent(text)}` : ""}`;
 
 export const formatPrice = (value: number) => `₦${value.toLocaleString("en-NG")}`;
 export const formatDate = (iso: string) =>

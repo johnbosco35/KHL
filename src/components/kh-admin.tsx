@@ -29,6 +29,7 @@ import {
   Users,
   X,
   ZoomIn,
+  Loader2,
 } from "lucide-react";
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis } from "recharts";
 import { toast } from "sonner";
@@ -88,6 +89,7 @@ import {
   type Payment,
   type Product,
   type ProductStatus,
+  type SettingsKey,
 } from "@/lib/mock-data";
 import { cn } from "@/lib/utils";
 
@@ -780,12 +782,10 @@ export function AdminProducts() {
         onOpenChange={(o) => !o && setToDelete(null)}
         title="Delete this product?"
         text={`"${toDelete?.name}" will be removed from the catalogue. Existing orders keep their records.`}
-        onConfirm={() => {
-          if (toDelete) {
-            deleteProduct(toDelete.id);
-            toast.success("Product deleted");
-          }
+        onConfirm={async () => {
+          const target = toDelete;
           setToDelete(null);
+          if (target && (await deleteProduct(target.id))) toast.success("Product deleted");
         }}
       />
     </>
@@ -900,7 +900,6 @@ export function ProductForm({ productId }: { productId?: string }) {
       return;
     }
     setSaving(true);
-    await new Promise((r) => setTimeout(r, 400));
     const id =
       existing?.id ??
       f.name
@@ -909,7 +908,7 @@ export function ProductForm({ productId }: { productId?: string }) {
         .replace(/(^-|-$)/g, "") +
         "-" +
         Math.random().toString(36).slice(2, 5);
-    app.saveProduct({
+    const saved = await app.saveProduct({
       id,
       sku: existing?.sku ?? `KH-${id.slice(0, 3).toUpperCase()}-${Date.now().toString().slice(-5)}`,
       name: f.name.trim(),
@@ -928,6 +927,8 @@ export function ProductForm({ productId }: { productId?: string }) {
       specifications: f.specifications.trim(),
       createdAt: existing?.createdAt ?? new Date().toISOString(),
     });
+    setSaving(false);
+    if (!saved) return;
     toast.success(existing ? "Product updated" : "Product created");
     navigate("/admin/products");
   };
@@ -1192,10 +1193,11 @@ export function AdminCategories() {
         onOpenChange={setOpen}
         category={edit}
         names={categories.filter((c) => c.id !== edit?.id).map((c) => c.name.toLowerCase())}
-        onSave={(c) => {
-          saveCategory({ ...c, id: edit?.id ?? uid("cat") });
-          toast.success(edit ? "Category updated" : "Category added");
-          setOpen(false);
+        onSave={async (c) => {
+          if (await saveCategory({ ...c, id: edit?.id ?? uid("cat") })) {
+            toast.success(edit ? "Category updated" : "Category added");
+            setOpen(false);
+          }
         }}
       />
       <Confirm
@@ -1208,12 +1210,12 @@ export function AdminCategories() {
             : "Are you sure you want to delete this category?"
         }
         action={del && count(del.name) > 0 ? "Understood" : "Delete"}
-        onConfirm={() => {
-          if (del && count(del.name) === 0) {
-            deleteCategory(del.id);
-            toast.success("Category deleted");
-          } else toast.error("Category still has products and was not deleted");
+        onConfirm={async () => {
+          const target = del;
           setDel(null);
+          if (target && count(target.name) === 0) {
+            if (await deleteCategory(target.id)) toast.success("Category deleted");
+          } else toast.error("Category still has products and was not deleted");
         }}
       />
     </>
@@ -1375,9 +1377,9 @@ export function AdminDelivery() {
                   <Switch
                     checked={l.active}
                     aria-label="Active"
-                    onCheckedChange={(v) => {
-                      saveLocation({ ...l, active: v });
-                      toast.success(`${l.name} is now ${v ? "active" : "inactive"}`);
+                    onCheckedChange={async (v) => {
+                      if (await saveLocation({ ...l, active: v }))
+                        toast.success(`${l.name} is now ${v ? "active" : "inactive"}`);
                     }}
                   />
                   <p className="mt-1 text-[10px] uppercase tracking-wider text-muted-foreground">
@@ -1408,10 +1410,11 @@ export function AdminDelivery() {
         open={open}
         onOpenChange={setOpen}
         location={edit}
-        onSave={(l) => {
-          saveLocation({ ...l, id: edit?.id ?? uid("loc") });
-          toast.success(edit ? "Location updated" : "Location added");
-          setOpen(false);
+        onSave={async (l) => {
+          if (await saveLocation({ ...l, id: edit?.id ?? uid("loc") })) {
+            toast.success(edit ? "Location updated" : "Location added");
+            setOpen(false);
+          }
         }}
       />
       <Confirm
@@ -1419,12 +1422,10 @@ export function AdminDelivery() {
         onOpenChange={(o) => !o && setDel(null)}
         title="Delete location"
         text="Are you sure you want to delete this delivery location?"
-        onConfirm={() => {
-          if (del) {
-            deleteLocation(del.id);
-            toast.success("Location deleted");
-          }
+        onConfirm={async () => {
+          const target = del;
           setDel(null);
+          if (target && (await deleteLocation(target.id))) toast.success("Location deleted");
         }}
       />
     </>
@@ -1599,9 +1600,9 @@ export function AdminReviews() {
                   {r.status !== "approved" && (
                     <Button
                       size="sm"
-                      onClick={() => {
-                        setReviewStatus(r.id, "approved");
-                        toast.success("Review approved and now visible");
+                      onClick={async () => {
+                        if (await setReviewStatus(r.id, "approved"))
+                          toast.success("Review approved and now visible");
                       }}
                     >
                       <Eye />
@@ -1612,9 +1613,9 @@ export function AdminReviews() {
                     <Button
                       size="sm"
                       variant="outline"
-                      onClick={() => {
-                        setReviewStatus(r.id, "hidden");
-                        toast("Review hidden from customers");
+                      onClick={async () => {
+                        if (await setReviewStatus(r.id, "hidden"))
+                          toast("Review hidden from customers");
                       }}
                     >
                       <EyeOff />
@@ -1974,9 +1975,8 @@ export function AdminOrderDetail({ orderId }: { orderId: string }) {
               <Button
                 className="mt-3 w-full"
                 disabled={!next || next === o.status}
-                onClick={() => {
-                  if (next) {
-                    setOrderStatus(o.id, next);
+                onClick={async () => {
+                  if (next && (await setOrderStatus(o.id, next))) {
                     toast.success(`Order marked: ${ORDER_STEP_LABELS[next]}`);
                     setNext("");
                   }
@@ -2302,9 +2302,9 @@ export function AdminPaymentDetail({ paymentId }: { paymentId: string }) {
     ) : null;
   const o = orders.find((x) => x.id === p.orderId);
   const c = users.find((u) => u.id === p.customerId);
-  const act = () => {
+  const act = async () => {
     if (!dialog) return;
-    paymentAction(p.id, dialog, note.trim().slice(0, 300) || undefined);
+    if (!(await paymentAction(p.id, dialog, note.trim().slice(0, 300) || undefined))) return;
     toast.success(
       dialog === "confirm"
         ? "Payment confirmed — order can proceed"
@@ -2479,43 +2479,178 @@ export function AdminPaymentDetail({ paymentId }: { paymentId: string }) {
 }
 
 // ---------------- Settings ----------------
+type SettingsField = { key: string; label: string; long?: boolean; type?: string };
+const SETTINGS_SECTIONS: Record<SettingsKey, { text: string; fields: SettingsField[] }> = {
+  brand: {
+    text: "How KH Luxury introduces itself across the storefront.",
+    fields: [
+      { key: "brandName", label: "Brand name" },
+      { key: "contactEmail", label: "Contact email", type: "email" },
+      { key: "brandStatement", label: "Brand statement", long: true },
+      { key: "instagramHandle", label: "Instagram handle" },
+    ],
+  },
+  payment: {
+    text: "Bank details shown to customers at checkout and on payment pages.",
+    fields: [
+      { key: "accountName", label: "Account name" },
+      { key: "bankName", label: "Bank name" },
+      { key: "accountNumber", label: "Account number" },
+      { key: "paymentInstructions", label: "Payment instructions", long: true },
+    ],
+  },
+  whatsapp: {
+    text: "The concierge number used by the WhatsApp button, footer and contact page.",
+    fields: [
+      { key: "whatsappNumber", label: "WhatsApp number" },
+      { key: "defaultGreeting", label: "Default greeting", long: true },
+      { key: "businessHours", label: "Business hours" },
+    ],
+  },
+};
+
 export function AdminGeneric({ view }: { view: string }) {
   const title = view
     .split("-")
     .map((s) => s.charAt(0).toUpperCase() + s.slice(1))
     .join(" ");
-  return <SettingsForm title={title} />;
+  if (view === "admin-profile") return <AdminProfileForm title={title} />;
+  if (view === "security-settings") return <AdminPasswordForm title={title} />;
+  const key = view.replace("-settings", "") as SettingsKey;
+  return SETTINGS_SECTIONS[key] ? <StoreSettingsForm key={key} section={key} title={title} /> : null;
 }
-function SettingsForm({ title }: { title: string }) {
-  const fields = title.includes("Payment")
-    ? ["Account name", "Bank name", "Account number", "Payment instructions"]
-    : title.includes("WhatsApp")
-      ? ["WhatsApp number", "Default greeting", "Business hours"]
-      : title.includes("Security")
-        ? ["Current password", "New password", "Confirm new password"]
-        : title.includes("Profile")
-          ? ["Full name", "Email", "Phone"]
-          : ["Brand name", "Contact email", "Brand statement", "Instagram handle"];
+
+function StoreSettingsForm({ section, title }: { section: SettingsKey; title: string }) {
+  const { settings, saveSettings, ready } = useApp();
+  const { text, fields } = SETTINGS_SECTIONS[section];
+  const current = settings[section] as Record<string, string>;
+  const [values, setValues] = useState<Record<string, string>>(current);
+  const [saving, setSaving] = useState(false);
+  useEffect(() => setValues(current), [current]);
+  if (!ready) return <Skeleton className="h-80 max-w-2xl" />;
   return (
     <>
-      <AdminTitle title={title} text="Changes are stored in preview state only." />
+      <AdminTitle title={title} text={text} />
       <form
         className="admin-card max-w-2xl"
-        onSubmit={(e) => {
+        onSubmit={async (e) => {
           e.preventDefault();
-          toast.success("Settings saved");
+          setSaving(true);
+          const ok = await saveSettings(section, values as never);
+          setSaving(false);
+          if (ok) toast.success("Settings saved");
         }}
       >
         {fields.map((f) => (
-          <Field key={f} label={f}>
-            {f.includes("instructions") || f.includes("statement") ? (
-              <Textarea />
+          <Field key={f.key} label={f.label}>
+            {f.long ? (
+              <Textarea
+                value={values[f.key] ?? ""}
+                maxLength={2000}
+                onChange={(e) => setValues((v) => ({ ...v, [f.key]: e.target.value }))}
+              />
             ) : (
-              <Input type={f.toLowerCase().includes("password") ? "password" : "text"} />
+              <Input
+                type={f.type ?? "text"}
+                value={values[f.key] ?? ""}
+                maxLength={200}
+                onChange={(e) => setValues((v) => ({ ...v, [f.key]: e.target.value }))}
+              />
             )}
           </Field>
         ))}
-        <Button className="mt-6">Save changes</Button>
+        <Button className="mt-6" disabled={saving}>
+          {saving && <Loader2 className="animate-spin" />}
+          Save changes
+        </Button>
+      </form>
+    </>
+  );
+}
+
+function AdminProfileForm({ title }: { title: string }) {
+  const { user, updateProfile } = useApp();
+  const [f, setF] = useState({ name: user?.name ?? "", email: user?.email ?? "", phone: user?.phone ?? "" });
+  const [saving, setSaving] = useState(false);
+  return (
+    <>
+      <AdminTitle title={title} text="Your name and contact details as an administrator." />
+      <form
+        className="admin-card max-w-2xl"
+        onSubmit={async (e) => {
+          e.preventDefault();
+          if (f.name.trim().length < 2) { toast.error("Enter your full name"); return; }
+          setSaving(true);
+          const ok = await updateProfile({
+            name: f.name.trim(),
+            email: f.email.trim(),
+            phone: f.phone.trim(),
+          });
+          setSaving(false);
+          if (ok) toast.success("Profile updated");
+        }}
+      >
+        <Field label="Full name">
+          <Input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} />
+        </Field>
+        <Field label="Email">
+          <Input type="email" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} />
+        </Field>
+        <Field label="Phone">
+          <Input value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value })} />
+        </Field>
+        <Button className="mt-6" disabled={saving}>
+          {saving && <Loader2 className="animate-spin" />}
+          Save changes
+        </Button>
+      </form>
+    </>
+  );
+}
+
+function AdminPasswordForm({ title }: { title: string }) {
+  const { changePassword } = useApp();
+  const [f, setF] = useState({ current: "", next: "", confirm: "" });
+  const [saving, setSaving] = useState(false);
+  return (
+    <>
+      <AdminTitle title={title} text="Change the password for this admin account." />
+      <form
+        className="admin-card max-w-2xl"
+        onSubmit={async (e) => {
+          e.preventDefault();
+          if (!f.current) { toast.error("Enter your current password"); return; }
+          if (f.next.length < 8) { toast.error("New password must be at least 8 characters"); return; }
+          if (f.next !== f.confirm) { toast.error("New passwords do not match"); return; }
+          setSaving(true);
+          const ok = await changePassword(f.current, f.next);
+          setSaving(false);
+          if (ok) {
+            toast.success("Password changed");
+            setF({ current: "", next: "", confirm: "" });
+          }
+        }}
+      >
+        {(
+          [
+            ["current", "Current password", "current-password"],
+            ["next", "New password", "new-password"],
+            ["confirm", "Confirm new password", "new-password"],
+          ] as const
+        ).map(([k, label, auto]) => (
+          <Field key={k} label={label}>
+            <Input
+              type="password"
+              autoComplete={auto}
+              value={f[k]}
+              onChange={(e) => setF({ ...f, [k]: e.target.value })}
+            />
+          </Field>
+        ))}
+        <Button className="mt-6" disabled={saving}>
+          {saving && <Loader2 className="animate-spin" />}
+          Update password
+        </Button>
       </form>
     </>
   );

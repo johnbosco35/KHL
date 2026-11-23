@@ -9,15 +9,9 @@ import {
   type ReactNode,
 } from "react";
 import { toast } from "sonner";
+import { api, ApiError, errorMessage, tokenStore, uploadIfDataUrl } from "@/lib/api";
 import {
-  seedCategories,
-  seedLocations,
-  seedOrders,
-  seedPayments,
-  seedProducts,
-  seedReviews,
-  seedUsers,
-  VAT_RATE,
+  defaultSettings,
   type CartItem,
   type Category,
   type Customization,
@@ -29,12 +23,18 @@ import {
   type Receipt,
   type Review,
   type ReviewStatus,
+  type Role,
+  type Settings,
+  type SettingsKey,
   type User,
 } from "@/lib/mock-data";
 
 /**
- * Mock data layer. Everything lives in one persisted object (localStorage) so each record
- * exists once and every screen reads the same source. Swap these actions for backend calls later.
+ * App data layer backed by the KH Luxury API (src/lib/api.ts → server/).
+ *
+ * Every screen reads the same shared state from `useApp()`. Data actions show their own error toast
+ * and resolve to `null` / `false` when they fail, so callers only branch on success. Auth actions
+ * (signIn, signUp, resetPassword) throw instead, because the auth form displays the message itself.
  */
 type DB = {
   products: Product[];
@@ -44,10 +44,9 @@ type DB = {
   users: User[];
   orders: Order[];
   payments: Payment[];
-  carts: Record<string, CartItem[]>;
-  wishlists: Record<string, string[]>;
-  sessionUserId: string | null;
-  resetTokens: Record<string, string>;
+  cart: CartItem[];
+  wishlist: string[];
+  settings: Settings;
 };
 export type PendingAction =
   | {
@@ -61,331 +60,416 @@ export type PendingAction =
   | { type: "wishlist"; productId: string; returnTo: string }
   | { type: "navigate"; returnTo: string };
 
-const KEY = "kh-luxury-db-v2";
 const PENDING = "kh-luxury-pending";
-const seed = (): DB => ({
-  products: seedProducts,
-  categories: seedCategories,
-  locations: seedLocations,
-  reviews: seedReviews,
-  users: seedUsers,
-  orders: seedOrders,
-  payments: seedPayments,
-  carts: {},
-  wishlists: { "cus-1001": ["noir-structure-jacket"] },
-  sessionUserId: null,
-  resetTokens: {},
-});
+const empty: DB = {
+  products: [],
+  categories: [],
+  locations: [],
+  reviews: [],
+  users: [],
+  orders: [],
+  payments: [],
+  cart: [],
+  wishlist: [],
+  settings: defaultSettings,
+};
 const uid = (prefix: string) => `${prefix}-${Math.random().toString(36).slice(2, 8)}`;
-const now = () => new Date().toISOString();
 
-function useDBState() {
-  const [db, setDb] = useState<DB>(seed);
-  const [ready, setReady] = useState(false);
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem(KEY);
-      if (raw) setDb({ ...seed(), ...JSON.parse(raw) });
-    } catch {
-      /* ignore */
-    }
-    setReady(true);
-  }, []);
-  const first = useRef(true);
-  useEffect(() => {
-    if (!ready) return;
-    if (first.current) {
-      first.current = false;
-      return;
-    }
-    try {
-      localStorage.setItem(KEY, JSON.stringify(db));
-    } catch {
-      toast.error("Storage is full — try a smaller file.");
-    }
-  }, [db, ready]);
-  return { db, setDb, ready };
+/** Loads everything the given account (or a guest) is allowed to see. */
+async function loadFor(user: User | null): Promise<Partial<DB>> {
+  const [p, c, l, r, s] = await Promise.all([
+    api<{ products: Product[] }>("GET", "/products"),
+    api<{ categories: Category[] }>("GET", "/categories"),
+    api<{ locations: DeliveryLocation[] }>("GET", "/delivery-locations"),
+    api<{ reviews: Review[] }>("GET", "/reviews"),
+    api<{ settings: Settings }>("GET", "/settings"),
+  ]);
+  const base: Partial<DB> = {
+    products: p.products,
+    categories: c.categories,
+    locations: l.locations,
+    reviews: r.reviews,
+    settings: s.settings,
+    users: user ? [user] : [],
+    orders: [],
+    payments: [],
+    cart: [],
+    wishlist: [],
+  };
+  if (user?.role === "customer") {
+    const [cart, wish, orders, payments, mine] = await Promise.all([
+      api<{ cart: CartItem[] }>("GET", "/cart"),
+      api<{ wishlist: string[] }>("GET", "/wishlist"),
+      api<{ orders: Order[] }>("GET", "/orders"),
+      api<{ payments: Payment[] }>("GET", "/payments"),
+      api<{ reviews: Review[] }>("GET", "/reviews/mine"),
+    ]);
+    const own = new Set(mine.reviews.map((x) => x.id));
+    return {
+      ...base,
+      cart: cart.cart,
+      wishlist: wish.wishlist,
+      orders: orders.orders,
+      payments: payments.payments,
+      reviews: [...mine.reviews, ...r.reviews.filter((x) => !own.has(x.id))],
+    };
+  }
+  if (user?.role === "admin") {
+    const [orders, payments, customers] = await Promise.all([
+      api<{ orders: Order[] }>("GET", "/orders"),
+      api<{ payments: Payment[] }>("GET", "/payments"),
+      api<{ customers: User[] }>("GET", "/admin/customers"),
+    ]);
+    return {
+      ...base,
+      orders: orders.orders,
+      payments: payments.payments,
+      users: [user, ...customers.customers],
+    };
+  }
+  return base;
 }
 
+const upsert = <T extends { id: string }>(list: T[], item: T, prepend = false) =>
+  list.some((x) => x.id === item.id)
+    ? list.map((x) => (x.id === item.id ? item : x))
+    : prepend
+      ? [item, ...list]
+      : [...list, item];
+
 function useAppValue() {
-  const { db, setDb, ready } = useDBState();
-  const user = db.users.find((u) => u.id === db.sessionUserId) ?? null;
-  // Tracks the session synchronously so an action resumed right after sign-in targets the new account.
-  const sessionRef = useRef<string | null>(null);
-  sessionRef.current = db.sessionUserId;
-  const update = useCallback(
-    (fn: (d: DB) => Partial<DB>) => setDb((d) => ({ ...d, ...fn(d) })),
-    [setDb],
+  const [db, setDb] = useState<DB>(empty);
+  const [user, setUser] = useState<User | null>(null);
+  const [ready, setReady] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const userRef = useRef<User | null>(null);
+  userRef.current = user;
+
+  const update = useCallback((fn: (d: DB) => Partial<DB>) => setDb((d) => ({ ...d, ...fn(d) })), []);
+
+  /** Re-fetches all data for the current session. */
+  const refresh = useCallback(async (as: User | null = userRef.current) => {
+    try {
+      const data = await loadFor(as);
+      setDb((d) => ({ ...d, ...data }));
+      setLoadError(null);
+    } catch (err) {
+      setLoadError(errorMessage(err));
+    }
+  }, []);
+
+  const endSession = useCallback(
+    (as: User | null) => {
+      tokenStore.set(null);
+      userRef.current = null;
+      setUser(null);
+      setDb((d) => ({ ...d, cart: [], wishlist: [], orders: [], payments: [], users: [] }));
+      return refresh(null).then(() => as);
+    },
+    [refresh],
   );
 
-  // ---------- Auth ----------
-  const signIn = (email: string, password: string, role: "customer" | "admin"): User => {
-    const u = db.users.find((x) => x.email.toLowerCase() === email.trim().toLowerCase());
-    if (!u || u.password !== password) throw new Error("Incorrect email or password.");
-    if (u.role !== role)
-      throw new Error(
-        role === "admin"
-          ? "This account does not have admin access."
-          : "Admin accounts must sign in through the admin portal.",
-      );
-    if (u.status !== "active") throw new Error("This account is suspended.");
-    sessionRef.current = u.id;
-    update(() => ({ sessionUserId: u.id }));
-    return u;
-  };
-  const signUp = (data: { name: string; email: string; phone: string; password: string }): User => {
-    if (db.users.some((x) => x.email.toLowerCase() === data.email.trim().toLowerCase()))
-      throw new Error("An account with this email already exists.");
-    const u: User = {
-      id: uid("cus"),
-      name: data.name.trim(),
-      email: data.email.trim().toLowerCase(),
-      phone: data.phone.trim(),
-      password: data.password,
-      role: "customer",
-      createdAt: now(),
-      status: "active",
+  // Restore the session (if any) and load initial data.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      let me: User | null = null;
+      if (tokenStore.get()) {
+        try {
+          me = (await api<{ user: User }>("GET", "/auth/me")).user;
+        } catch (err) {
+          if (err instanceof ApiError && err.status === 401) tokenStore.set(null);
+        }
+      }
+      if (cancelled) return;
+      userRef.current = me;
+      setUser(me);
+      await refresh(me);
+      if (!cancelled) setReady(true);
+    })();
+    return () => {
+      cancelled = true;
     };
-    sessionRef.current = u.id;
-    update((d) => ({ users: [...d.users, u], sessionUserId: u.id }));
-    return u;
-  };
-  const signOut = () => update(() => ({ sessionUserId: null }));
-  const requestReset = (email: string, role: "customer" | "admin") => {
-    const u = db.users.find(
-      (x) => x.email.toLowerCase() === email.trim().toLowerCase() && x.role === role,
-    );
-    if (!u) return null;
-    const token = Math.random().toString(36).slice(2, 12);
-    update((d) => ({ resetTokens: { ...d.resetTokens, [token]: u.id } }));
-    return token;
-  };
-  const resetPassword = (token: string, password: string): User => {
-    const id = db.resetTokens[token];
-    const u = db.users.find((x) => x.id === id);
-    if (!u) throw new Error("This reset link is invalid or has expired.");
-    update((d) => {
-      const t = { ...d.resetTokens };
-      delete t[token];
-      return { users: d.users.map((x) => (x.id === id ? { ...x, password } : x)), resetTokens: t };
-    });
-    return u;
-  };
-  const updateProfile = (patch: Partial<Pick<User, "name" | "phone" | "email">>) =>
-    user &&
-    update((d) => ({ users: d.users.map((x) => (x.id === user.id ? { ...x, ...patch } : x)) }));
-  const changePassword = (current: string, next: string) => {
-    if (!user || user.password !== current) throw new Error("Current password is incorrect.");
-    update((d) => ({
-      users: d.users.map((x) => (x.id === user.id ? { ...x, password: next } : x)),
-    }));
-  };
+  }, [refresh]);
 
-  // ---------- Cart & wishlist (per customer) ----------
-  const cart = user ? (db.carts[user.id] ?? []) : [];
-  const wishlist = user ? (db.wishlists[user.id] ?? []) : [];
-  const setCart = (fn: (c: CartItem[]) => CartItem[]) => {
-    const id = sessionRef.current;
-    if (id) update((d) => ({ carts: { ...d.carts, [id]: fn(d.carts[id] ?? []) } }));
+  /** Runs an API action; on failure shows a toast and returns `fallback`. */
+  const run = useCallback(
+    async <T,>(fn: () => Promise<T>, fallback: T): Promise<T> => {
+      try {
+        return await fn();
+      } catch (err) {
+        if (err instanceof ApiError && err.status === 401 && userRef.current) {
+          toast.error("Your session has ended. Please sign in again.");
+          await endSession(null);
+        } else toast.error(errorMessage(err));
+        return fallback;
+      }
+    },
+    [endSession],
+  );
+
+  // ---------- Auth (these throw; the auth form shows the error) ----------
+  const startSession = async (res: { user: User; token: string }) => {
+    tokenStore.set(res.token);
+    userRef.current = res.user;
+    setUser(res.user);
+    await refresh(res.user);
+    return res.user;
   };
+  const signIn = async (email: string, password: string, role: Role): Promise<User> =>
+    startSession(await api("POST", "/auth/login", { email: email.trim(), password, role }));
+  const signUp = async (data: { name: string; email: string; phone: string; password: string }) =>
+    startSession(await api("POST", "/auth/register", data));
+  const signOut = () => void endSession(null);
+  /** Returns the reset token when the API exposes it (development only), otherwise null. */
+  const requestReset = async (email: string, role: Role): Promise<string | null> => {
+    const res = await api<{ devResetUrl?: string }>("POST", "/auth/forgot-password", {
+      email: email.trim(),
+      role,
+    });
+    return res.devResetUrl ? new URL(res.devResetUrl).searchParams.get("token") : null;
+  };
+  const resetPassword = async (token: string, password: string): Promise<User> =>
+    (await api<{ user: User }>("POST", "/auth/reset-password", { token, password })).user;
+
+  // ---------- Profile ----------
+  const updateProfile = (patch: Partial<Pick<User, "name" | "phone" | "email">>) =>
+    run(async () => {
+      const { user: u } = await api<{ user: User }>("PATCH", "/auth/me", patch);
+      userRef.current = u;
+      setUser(u);
+      update((d) => ({ users: upsert(d.users, u) }));
+      return true;
+    }, false);
+  const changePassword = (currentPassword: string, newPassword: string) =>
+    run(async () => {
+      await api("POST", "/auth/me/password", { currentPassword, newPassword });
+      return true;
+    }, false);
+
+  // ---------- Bag & wishlist ----------
   const addToCart = (
     product: Product,
     size?: string,
     color?: string,
     quantity = 1,
     customization?: Customization,
-  ) => {
-    const s = size ?? product.sizes.at(0) ?? "M";
-    const c = color ?? product.colors.at(0) ?? "Obsidian";
-    const key = customization ? uid("custom") : `${product.id}|${s}|${c}`;
-    setCart((items) => {
-      const f = items.find((i) => i.key === key);
-      return f
-        ? items.map((i) => (i === f ? { ...i, quantity: i.quantity + quantity } : i))
-        : [
-            ...items,
-            {
-              key,
-              product,
-              quantity,
-              size: s,
-              color: c,
-              ...(customization ? { customization } : {}),
-            },
-          ];
-    });
-    toast.success(`${product.name} added to bag`);
-  };
-  const removeFromCart = (key: string) => setCart((items) => items.filter((i) => i.key !== key));
+  ) =>
+    run(async () => {
+      const { cart } = await api<{ cart: CartItem[] }>("POST", "/cart", {
+        productId: product.id,
+        size,
+        color,
+        quantity,
+        ...(customization ? { customization } : {}),
+      });
+      update(() => ({ cart }));
+      toast.success(`${product.name} added to bag`);
+      return true;
+    }, false);
+  const removeFromCart = (key: string) =>
+    run(async () => {
+      const { cart } = await api<{ cart: CartItem[] }>(
+        "DELETE",
+        `/cart/${encodeURIComponent(key)}`,
+      );
+      update(() => ({ cart }));
+      return true;
+    }, false);
   const updateQuantity = (key: string, q: number) =>
-    setCart((items) => items.map((i) => (i.key === key ? { ...i, quantity: Math.max(1, q) } : i)));
-  const toggleWishlist = (id: string, opts?: { onlyAdd?: boolean }) => {
-    const uidNow = sessionRef.current;
-    if (!uidNow) return;
-    const has = (db.wishlists[uidNow] ?? []).includes(id);
-    if (has && opts?.onlyAdd) return;
-    update((d) => {
-      const list = d.wishlists[uidNow] ?? [];
-      return {
-        wishlists: {
-          ...d.wishlists,
-          [uidNow]: list.includes(id) ? list.filter((x) => x !== id) : [...list, id],
-        },
-      };
-    });
-    toast(has ? "Removed from wishlist" : "Saved to wishlist");
-  };
+    run(async () => {
+      const { cart } = await api<{ cart: CartItem[] }>(
+        "PATCH",
+        `/cart/${encodeURIComponent(key)}`,
+        { quantity: Math.min(99, Math.max(1, q)) },
+      );
+      update(() => ({ cart }));
+      return true;
+    }, false);
+  const clearCart = () =>
+    run(async () => {
+      const { cart } = await api<{ cart: CartItem[] }>("DELETE", "/cart");
+      update(() => ({ cart }));
+      return true;
+    }, false);
+  const toggleWishlist = (id: string, opts?: { onlyAdd?: boolean }) =>
+    run(async () => {
+      const has = db.wishlist.includes(id);
+      if (has && opts?.onlyAdd) return true;
+      const { wishlist } = await api<{ wishlist: string[] }>(
+        has ? "DELETE" : "PUT",
+        `/wishlist/${encodeURIComponent(id)}`,
+      );
+      update(() => ({ wishlist }));
+      toast(has ? "Removed from wishlist" : "Saved to wishlist");
+      return true;
+    }, false);
 
   // ---------- Orders & payments ----------
   const placeOrder = (input: {
     contact: Order["contact"];
     delivery: Omit<Order["delivery"], "locationName">;
-  }): Order => {
-    if (!user) throw new Error("Please sign in.");
-    if (!cart.length) throw new Error("Your bag is empty.");
-    const loc = db.locations.find((l) => l.id === input.delivery.locationId && l.active);
-    if (!loc) throw new Error("Choose an available delivery location.");
-    const items = cart.map((i) => ({
-      productId: i.product.id,
-      name: i.product.name,
-      image: i.product.image,
-      price: i.product.price,
-      quantity: i.quantity,
-      size: i.size,
-      color: i.color,
-      ...(i.customization ? { customization: i.customization } : {}),
-    }));
-    const subtotal = items.reduce((n, i) => n + i.price * i.quantity, 0);
-    const vat = Math.round(subtotal * VAT_RATE);
-    const n = 1000 + db.orders.length + 1;
-    const id = `KH-${n}`;
-    const payId = `PAY-${n}`;
-    const order: Order = {
-      id,
-      customerId: user.id,
-      date: now(),
-      items,
-      subtotal,
-      vat,
-      deliveryFee: loc.fee,
-      total: subtotal + vat + loc.fee,
-      contact: input.contact,
-      delivery: { ...input.delivery, locationName: loc.name },
-      expectedDelivery: new Date(Date.now() + 5 * 864e5).toISOString(),
-      status: "placed",
-      paymentId: payId,
-    };
-    const payment: Payment = {
-      id: payId,
-      orderId: id,
-      customerId: user.id,
-      amount: order.total,
-      date: now(),
-      status: "awaiting_receipt",
-      notes: [],
-    };
-    update((d) => ({ orders: [order, ...d.orders], payments: [payment, ...d.payments] }));
-    return order;
-  };
+  }) =>
+    run(async () => {
+      const { order, payment } = await api<{ order: Order; payment: Payment }>(
+        "POST",
+        "/orders",
+        input,
+      );
+      update((d) => ({
+        orders: upsert(d.orders, order, true),
+        payments: upsert(d.payments, payment, true),
+      }));
+      // Stock changed — refresh the catalogue quietly.
+      void api<{ products: Product[] }>("GET", "/products")
+        .then(({ products }) => update(() => ({ products })))
+        .catch(() => undefined);
+      return order;
+    }, null as Order | null);
   /** Receipt upload never confirms payment; it only moves it to pending verification and clears the bag. */
-  const submitReceipt = (orderId: string, receipt: Receipt) =>
-    update((d) => {
-      const o = d.orders.find((x) => x.id === orderId);
-      return {
-        payments: d.payments.map((p) =>
-          p.orderId === orderId
-            ? {
-                ...p,
-                receipt,
-                status: "pending_verification",
-                date: now(),
-                notes: [...p.notes, { at: now(), text: "Customer uploaded a receipt." }],
-              }
-            : p,
-        ),
-        orders: d.orders.map((x) =>
-          x.id === orderId ? { ...x, status: "payment_verification" } : x,
-        ),
-        carts: o ? { ...d.carts, [o.customerId]: [] } : d.carts,
-      };
-    });
+  const submitReceipt = (orderId: string, receipt: Omit<Receipt, "uploadedAt">) =>
+    run(async () => {
+      const res = await api<{ order: Order; payment: Payment }>(
+        "POST",
+        `/orders/${encodeURIComponent(orderId)}/receipt`,
+        receipt,
+      );
+      update((d) => ({
+        orders: upsert(d.orders, res.order, true),
+        payments: upsert(d.payments, res.payment, true),
+        cart: [],
+      }));
+      return true;
+    }, false);
   const paymentAction = (
     paymentId: string,
     action: "confirm" | "reject" | "resubmit",
     note?: string,
   ) =>
-    update((d) => {
-      const pay = d.payments.find((p) => p.id === paymentId);
-      if (!pay) return {};
-      const status = action === "confirm" ? "paid" : action === "reject" ? "rejected" : "resubmit";
-      const text =
-        action === "confirm"
-          ? "Payment confirmed by admin."
-          : action === "reject"
-            ? `Payment rejected${note ? `: ${note}` : "."}`
-            : `New receipt requested${note ? `: ${note}` : "."}`;
-      return {
-        payments: d.payments.map((p) =>
-          p.id === paymentId ? { ...p, status, notes: [...p.notes, { at: now(), text }] } : p,
-        ),
-        orders: d.orders.map((o) =>
-          o.id === pay.orderId
-            ? { ...o, status: action === "confirm" ? "payment_confirmed" : "payment_verification" }
-            : o,
-        ),
-      };
-    });
+    run(async () => {
+      const res = await api<{ order: Order; payment: Payment }>(
+        "POST",
+        `/payments/${encodeURIComponent(paymentId)}/actions`,
+        { action, ...(note ? { note } : {}) },
+      );
+      update((d) => ({
+        orders: upsert(d.orders, res.order),
+        payments: upsert(d.payments, res.payment),
+      }));
+      return true;
+    }, false);
   const setOrderStatus = (orderId: string, status: OrderStatus) =>
-    update((d) => ({ orders: d.orders.map((o) => (o.id === orderId ? { ...o, status } : o)) }));
+    run(async () => {
+      const { order } = await api<{ order: Order }>(
+        "PATCH",
+        `/orders/${encodeURIComponent(orderId)}/status`,
+        { status },
+      );
+      update((d) => ({ orders: upsert(d.orders, order) }));
+      return true;
+    }, false);
 
   // ---------- Catalogue admin ----------
   const saveProduct = (p: Product) =>
-    update((d) => ({
-      products: d.products.some((x) => x.id === p.id)
-        ? d.products.map((x) => (x.id === p.id ? p : x))
-        : [p, ...d.products],
-    }));
+    run(async () => {
+      const images: string[] = [];
+      for (const img of p.images) images.push(await uploadIfDataUrl(img, "products"));
+      const image = await uploadIfDataUrl(p.image, "products");
+      const exists = db.products.some((x) => x.id === p.id);
+      const { createdAt: _c, ...body } = { ...p, image, images };
+      const { product } = await api<{ product: Product }>(
+        exists ? "PUT" : "POST",
+        exists ? `/products/${encodeURIComponent(p.id)}` : "/products",
+        body,
+      );
+      update((d) => ({ products: upsert(d.products, product, true) }));
+      return product;
+    }, null as Product | null);
   const deleteProduct = (id: string) =>
-    update((d) => ({ products: d.products.filter((x) => x.id !== id) }));
+    run(async () => {
+      await api("DELETE", `/products/${encodeURIComponent(id)}`);
+      update((d) => ({ products: d.products.filter((x) => x.id !== id) }));
+      return true;
+    }, false);
   const saveCategory = (c: Category) =>
-    update((d) => {
-      const old = d.categories.find((x) => x.id === c.id);
-      return {
-        categories: old ? d.categories.map((x) => (x.id === c.id ? c : x)) : [...d.categories, c],
-        products:
-          old && old.name !== c.name
-            ? d.products.map((p) => (p.category === old.name ? { ...p, category: c.name } : p))
-            : d.products,
-      };
-    });
+    run(async () => {
+      const old = db.categories.find((x) => x.id === c.id);
+      const image = c.image ? await uploadIfDataUrl(c.image, "categories") : null;
+      const { category } = await api<{ category: Category }>(
+        old ? "PUT" : "POST",
+        old ? `/categories/${encodeURIComponent(c.id)}` : "/categories",
+        { ...c, image },
+      );
+      update((d) => ({ categories: upsert(d.categories, category) }));
+      if (old && old.name !== category.name) await refresh(); // products were renamed too
+      return true;
+    }, false);
   const deleteCategory = (id: string) =>
-    update((d) => ({ categories: d.categories.filter((x) => x.id !== id) }));
+    run(async () => {
+      await api("DELETE", `/categories/${encodeURIComponent(id)}`);
+      update((d) => ({ categories: d.categories.filter((x) => x.id !== id) }));
+      return true;
+    }, false);
   const saveLocation = (l: DeliveryLocation) =>
-    update((d) => ({
-      locations: d.locations.some((x) => x.id === l.id)
-        ? d.locations.map((x) => (x.id === l.id ? l : x))
-        : [...d.locations, l],
-    }));
+    run(async () => {
+      const exists = db.locations.some((x) => x.id === l.id);
+      const { location } = await api<{ location: DeliveryLocation }>(
+        exists ? "PUT" : "POST",
+        exists ? `/delivery-locations/${encodeURIComponent(l.id)}` : "/delivery-locations",
+        l,
+      );
+      update((d) => ({ locations: upsert(d.locations, location) }));
+      return true;
+    }, false);
   const deleteLocation = (id: string) =>
-    update((d) => ({ locations: d.locations.filter((x) => x.id !== id) }));
+    run(async () => {
+      await api("DELETE", `/delivery-locations/${encodeURIComponent(id)}`);
+      update((d) => ({ locations: d.locations.filter((x) => x.id !== id) }));
+      return true;
+    }, false);
+
+  // ---------- Reviews ----------
   const setReviewStatus = (id: string, status: ReviewStatus) =>
-    update((d) => ({ reviews: d.reviews.map((r) => (r.id === id ? { ...r, status } : r)) }));
-  const addReview = (r: Omit<Review, "id" | "date" | "status" | "customerId">) =>
-    user &&
-    update((d) => ({
-      reviews: [
-        { ...r, id: uid("rev"), customerId: user.id, date: now(), status: "pending" },
-        ...d.reviews,
-      ],
-    }));
+    run(async () => {
+      const { review } = await api<{ review: Review }>(
+        "PATCH",
+        `/reviews/${encodeURIComponent(id)}/status`,
+        { status },
+      );
+      update((d) => ({ reviews: upsert(d.reviews, review) }));
+      return true;
+    }, false);
+  const addReview = (r: { productId: string; rating: number; text: string; image?: string }) =>
+    run(async () => {
+      const image = r.image ? await uploadIfDataUrl(r.image, "reviews") : undefined;
+      const { review } = await api<{ review: Review }>("POST", "/reviews", {
+        ...r,
+        ...(image ? { image } : {}),
+      });
+      update((d) => ({ reviews: upsert(d.reviews, review, true) }));
+      return true;
+    }, false);
+
+  // ---------- Settings & newsletter ----------
+  const saveSettings = <K extends SettingsKey>(key: K, value: Partial<Settings[K]>) =>
+    run(async () => {
+      const { settings } = await api<{ settings: Settings[K] }>("PUT", `/settings/${key}`, value);
+      update((d) => ({ settings: { ...d.settings, [key]: settings } }));
+      return true;
+    }, false);
+  const subscribe = (email: string) =>
+    run(async () => {
+      await api("POST", "/newsletter", { email });
+      return true;
+    }, false);
 
   return {
     ...db,
     ready,
+    loadError,
     user,
-    cart,
-    wishlist,
     uid,
+    refresh,
     signIn,
     signUp,
     signOut,
@@ -397,7 +481,7 @@ function useAppValue() {
     removeFromCart,
     updateQuantity,
     toggleWishlist,
-    clearCart: () => setCart(() => []),
+    clearCart,
     placeOrder,
     submitReceipt,
     paymentAction,
@@ -410,6 +494,8 @@ function useAppValue() {
     deleteLocation,
     setReviewStatus,
     addReview,
+    saveSettings,
+    subscribe,
   };
 }
 export type AppStore = ReturnType<typeof useAppValue>;
@@ -452,8 +538,10 @@ export const usePublicProducts = () => {
   return useMemo(() => products.filter((p) => p.status === "active"), [products]);
 };
 export const useApprovedReviews = (productId?: string) => {
-  const { reviews, users } = useApp();
-  return reviews
-    .filter((r) => r.status === "approved" && (!productId || r.productId === productId))
-    .map((r) => ({ ...r, author: users.find((u) => u.id === r.customerId)?.name ?? "KH client" }));
+  const { reviews } = useApp();
+  return useMemo(
+    () =>
+      reviews.filter((r) => r.status === "approved" && (!productId || r.productId === productId)),
+    [reviews, productId],
+  );
 };

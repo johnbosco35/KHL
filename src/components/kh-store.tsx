@@ -25,7 +25,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import type { Customization, Product } from "@/lib/mock-data";
-import { formatPrice } from "@/lib/mock-data";
+import { formatPrice, whatsappLink } from "@/lib/mock-data";
 import { AppProvider, savePending, useApp, type PendingAction } from "@/lib/app-store";
 import { cn } from "@/lib/utils";
 import { Tilt } from "@/components/kh-3d";
@@ -55,19 +55,20 @@ export function useStore() {
     cart: app.cart,
     wishlist: app.wishlist,
     user: app.user,
-    addToCart: (
+    /** Resolves to true when the item was added. */
+    addToCart: async (
       product: Product,
       size?: string,
       color?: string,
       quantity = 1,
       customization?: Customization,
-    ) => {
+    ): Promise<boolean> => {
       if (product.stock <= 0) {
         toast.error("This piece is currently sold out.");
-        return;
+        return false;
       }
       if (
-        gate({
+        !gate({
           type: "cart",
           productId: product.id,
           size: size ?? product.sizes.at(0) ?? "M",
@@ -76,11 +77,11 @@ export function useStore() {
           returnTo: path,
         })
       )
-        app.addToCart(product, size, color, quantity, customization);
+        return false;
+      return app.addToCart(product, size, color, quantity, customization);
     },
-    toggleWishlist: (id: string) => {
-      if (gate({ type: "wishlist", productId: id, returnTo: path })) app.toggleWishlist(id);
-    },
+    toggleWishlist: async (id: string): Promise<boolean> =>
+      gate({ type: "wishlist", productId: id, returnTo: path }) ? app.toggleWishlist(id) : false,
     requireCustomer: (returnTo = path) => gate({ type: "navigate", returnTo }),
     removeFromCart: app.removeFromCart,
     updateQuantity: app.updateQuantity,
@@ -557,6 +558,8 @@ export function EmptyState({
 }
 
 export function SiteFooter() {
+  const { subscribe, settings } = useApp();
+  const [sending, setSending] = useState(false);
   return (
     <footer className="relative overflow-hidden bg-primary text-primary-foreground">
       <div className="mx-auto grid max-w-[1440px] items-end gap-8 border-b border-primary-foreground/10 px-6 py-14 md:grid-cols-2 md:px-10">
@@ -568,14 +571,22 @@ export function SiteFooter() {
         </div>
         <form
           className="flex border-b border-primary-foreground/30 transition-colors focus-within:border-luxury"
-          onSubmit={(e) => {
+          onSubmit={async (e) => {
             e.preventDefault();
-            (e.currentTarget as HTMLFormElement).reset();
-            toast.success("Welcome to the KH Luxury private list");
+            const form = e.currentTarget as HTMLFormElement;
+            const email = String(new FormData(form).get("email") ?? "").trim();
+            if (!email || sending) return;
+            setSending(true);
+            if (await subscribe(email)) {
+              form.reset();
+              toast.success("Welcome to the KH Luxury private list");
+            }
+            setSending(false);
           }}
         >
           <input
             type="email"
+            name="email"
             required
             placeholder="Your email address"
             aria-label="Email address"
@@ -583,7 +594,8 @@ export function SiteFooter() {
           />
           <button
             type="submit"
-            className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[.2em] text-luxury transition-colors hover:text-primary-foreground"
+            disabled={sending}
+            className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[.2em] text-luxury transition-colors hover:text-primary-foreground disabled:opacity-60"
           >
             Subscribe <ArrowRight className="size-4" />
           </button>
@@ -620,7 +632,14 @@ export function SiteFooter() {
           <p className="mt-4 text-sm text-primary-foreground/60">
             WhatsApp
             <br />
-            +2348100234233
+            <a
+              href={whatsappLink(settings.whatsapp.whatsappNumber)}
+              target="_blank"
+              rel="noreferrer"
+              className="hover:text-primary-foreground"
+            >
+              {settings.whatsapp.whatsappNumber}
+            </a>
           </p>
           <div className="mt-5 flex gap-4 text-xs uppercase tracking-wider">
             <a
@@ -685,9 +704,10 @@ function FooterList({
 }
 
 export function WhatsAppButton() {
+  const { settings } = useApp();
   return (
     <a
-      href="https://wa.me/+2348100234233"
+      href={whatsappLink(settings.whatsapp.whatsappNumber, settings.whatsapp.defaultGreeting)}
       target="_blank"
       rel="noreferrer"
       aria-label="Contact KH Luxury on WhatsApp"
