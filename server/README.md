@@ -27,21 +27,25 @@ Production: `npm run build && npm start`.
 ## Connecting the storefront
 
 The frontend talks to this API through `src/lib/api.ts`, using `VITE_API_URL`
-(default `http://localhost:4100/api`).
+(default `http://localhost:4100/api` in development and
+`https://khl-ipt2.onrender.com/api` in production).
 
 1. Start the API (`npm run dev` in `server/`). Check http://localhost:4100/api/health shows
    `"service":"kh-luxury-api"`.
 2. In the project root, run `npm run dev` and open http://localhost:8080. If your API isn't on port 4100,
    copy `.env.example` to `.env.local`, set `VITE_API_URL`, and restart Vite.
-3. In development any `localhost` origin may call the API. In production, list the storefront's address
-   in `CORS_ORIGIN`.
+3. In development any `localhost` origin may call the API. In production, set the API host's
+   `CORS_ORIGIN` to include the storefront origin, for example
+   `https://khl-self.vercel.app` (comma-separated if there are multiple origins).
 
 If the storefront says "is not the KH Luxury API", some other program owns that port. Change `PORT`
 here and `VITE_API_URL` to match.
 
-**Deploying:** host the API somewhere public (Render, Railway, Fly…). Set its `API_URL`, `APP_URL` and
-`CORS_ORIGIN` to the public addresses, then set `VITE_API_URL` on the frontend host (Vercel / Lovable)
-and rebuild. A deployed storefront can't reach `localhost`.
+**Deploying:** host the API somewhere public (Render, Railway, Fly…). Set `API_URL` to
+`https://khl-ipt2.onrender.com`, `APP_URL` to `https://khl-self.vercel.app`, and include
+`https://khl-self.vercel.app` in `CORS_ORIGIN` on the API host. Then set `VITE_API_URL` on the
+frontend host (Vercel / Lovable) if you need to override the production default, and rebuild.
+A deployed storefront can't reach `localhost`.
 
 - **Database:** set `MONGODB_URI` to your MongoDB connection string. The API creates its indexes on startup.
 - **Uploads:** files are saved under `server/uploads` and served at `/uploads`.

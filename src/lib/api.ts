@@ -1,9 +1,13 @@
 /**
  * Thin client for the KH Luxury API (server/). Set VITE_API_URL to the API's /api base URL;
- * it defaults to the local dev server.
+ * it defaults to the local dev server in development and the deployed API in production.
  */
+const DEFAULT_API_URL = import.meta.env.DEV
+  ? "http://localhost:4100/api"
+  : "https://khl-ipt2.onrender.com/api";
+
 export const API_URL = (
-  (import.meta.env["VITE_API_URL"] as string | undefined) || "http://localhost:4100/api"
+  (import.meta.env["VITE_API_URL"] as string | undefined) || DEFAULT_API_URL
 ).replace(/\/$/, "");
 
 const WRONG_SERVER = `The server at ${API_URL} is not the KH Luxury API. Another app may be using that port. Start the API in server/ (npm run dev) and make sure VITE_API_URL matches its address.`;

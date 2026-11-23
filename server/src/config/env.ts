@@ -5,7 +5,9 @@ const schema = z.object({
   NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
   // 4100 rather than 4000, which other local projects commonly use.
   PORT: z.coerce.number().default(4100),
-  CORS_ORIGIN: z.string().default("http://localhost:8080,http://localhost:5173"),
+  CORS_ORIGIN: z
+    .string()
+    .default("http://localhost:8080,http://localhost:5173,https://khl-self.vercel.app"),
   APP_URL: z.string().default("http://localhost:8080"),
   // Public URL of this API (defaults to http://localhost:PORT), used to build links to locally stored uploads.
   API_URL: z.string().optional(),
